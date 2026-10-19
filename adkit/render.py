@@ -262,7 +262,8 @@ def log_history(film, path):
     """Remember the creative choices of every final film so the next one can differ."""
     b = film.brief
     rec = dict(date=time.strftime("%Y-%m-%d %H:%M"), product=film.name, file=path, aspect=b.get("aspect", "16:9"),
-               format=film.format, ending=film.ending,
+               format=film.format, ending=film.ending, signature=film.signature,
+               sfx=getattr(film, "sfx_info", {}).get("palette"),
                duration=round(film.duration, 1), opening=b.get("opening", "slam"), hook=b.get("hook", "converge"),
                stage=b.get("stage", {}).get("mode", "light"), mood=b.get("music", {}).get("mood", "hype")
                if not b.get("music", {}).get("file") else "own track",
@@ -280,6 +281,7 @@ def cmd_history(a):
     rows = [json.loads(l) for l in open(HISTORY, encoding="utf-8") if l.strip()][-a.n:]
     for r in rows:
         print(f"{r['date']}  {r['product']:<18} format={r.get('format', '?'):<9} end={r.get('ending', 'race'):<6} "
+              f"sig={r.get('signature', 'none'):<7} sfx={r.get('sfx') or '-':<10} "
               f"{r['aspect']:<5} open={r['opening']:<5} hook={r['hook']:<8} "
               f"stage={r['stage']:<5} mood={r['mood']:<10} voice={r.get('voice')}  scenes={'>'.join(r['scenes'])}")
 

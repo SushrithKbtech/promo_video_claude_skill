@@ -160,8 +160,15 @@ def build_mix(film, out_path):
     music *= db(float(mspec.get("gain_db", 0.0)))
 
     cues = film.cues()
-    dark = mspec.get("mood") in ("dark", "epic")
-    sfx = _fit(render_cues(cues, film.duration, dark=dark), n)
+    dark = mspec.get("mood") in ("dark", "epic", "cinematic")
+    from .music import seed_of
+    from .sfx import MOOD_PALETTE, Palette
+    sspec = b.get("sfx", {})
+    pname = sspec.get("palette") or MOOD_PALETTE.get(mspec.get("mood", "hype"), "clean")
+    palette = Palette(pname, seed_of(film.name, pname, sspec.get("seed", 0), "sfx"))
+    film.sfx_info = palette.describe()
+    print(f"[sfx] {film.sfx_info}")
+    sfx = _fit(render_cues(cues, film.duration, dark=dark, palette=palette), n)
     sfx *= db(float(b.get("sfx_gain_db", 0.0)))
 
     vo, meta = voice_bed(film)

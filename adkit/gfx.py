@@ -125,6 +125,21 @@ class Canvas:
         self.camera = dict(zoom=1.0, x=0.0, y=0.0, rot=0.0)
         self.box = {"ui": None, "under": None, "over": None}  # touched regions, px
         self.off = (0.0, 0.0)  # design-px translation applied to everything drawn (whip pans)
+        self.zoom = 1.0        # scale about the frame centre (push transitions)
+        self.fade = 1.0        # opacity multiplier for everything drawn
+        self.region = None     # (x0, x1) design px: only this vertical band is visible (wipes)
+
+    def _tp(self, x, y):
+        """Design point after the canvas camera (offset, then zoom about the centre)."""
+        cx, cy = self.W / self.S / 2, self.H / self.S / 2
+        return cx + (x + self.off[0] - cx) * self.zoom, cy + (y + self.off[1] - cy) * self.zoom
+
+    def _region_mask(self, x0, x1):
+        if self.region is None:
+            return None
+        r0, r1 = self.region
+        xs = np.arange(x0, x1, dtype=np.float32) / self.S
+        return np.clip(np.minimum(xs - r0, r1 - xs) / 2.0 + 0.5, 0, 1).astype(np.float32)
 
     def _touch(self, layer, x0, y0, x1, y1):
         b = self.box[layer]
@@ -181,9 +196,12 @@ class Canvas:
         """
         if alpha <= 0.002 or scale <= 1e-4:
             return
-        x, y = x + self.off[0], y + self.off[1]
-        sxx = scale if sx is None else sx
-        syy = scale if sy is None else sy
+        x, y = self._tp(x, y)
+        alpha *= self.fade
+        if alpha <= 0.002:
+            return
+        sxx = (scale if sx is None else sx) * self.zoom
+        syy = (scale if sy is None else sy) * self.zoom
         need = self.S * max(abs(sxx), abs(syy))
         img, ppd = sp.pick(need)
         if flip:
@@ -217,8 +235,10 @@ class Canvas:
             m = clamp((edge - xs) / max(1e-3, soft) + 0.5)
             src *= m[None, :, None]
         if clip is not None or band is not None or grad is not None:
-            ys_ = (np.arange(y0, y1, dtype=np.float32) / self.S - self.off[1])[:, None]
-            xs_ = (np.arange(x0, x1, dtype=np.float32) / self.S - self.off[0])[None, :]
+            # back into the scene's own coordinates (undo zoom, then offset)
+            ccx, ccy = self.W / self.S / 2, self.H / self.S / 2
+            ys_ = (ccy + (np.arange(y0, y1, dtype=np.float32) / self.S - ccy) / self.zoom - self.off[1])[:, None]
+            xs_ = (ccx + (np.arange(x0, x1, dtype=np.float32) / self.S - ccx) / self.zoom - self.off[0])[None, :]
             m = np.ones((y1 - y0, x1 - x0), np.float32)
             if clip is not None:
                 cx0, cy0, cx1, cy1 = clip
@@ -233,6 +253,9 @@ class Canvas:
                 L2 = dx * dx + dy * dy + 1e-6
                 m *= np.clip(1 - ((xs_ - gx0) * dx + (ys_ - gy0) * dy) / L2, 0, 1)
             src *= m[..., None]
+        rm = self._region_mask(x0, x1)
+        if rm is not None:
+            src *= rm[None, :, None]
         if dim > 0:
             # pull colour toward the stage while keeping coverage
             src[..., :3] = src[..., :3] * (1 - dim) + src[..., 3:4] * self._stage_lin * dim
@@ -264,7 +287,8 @@ class Canvas:
 
     def draw_quad(self, sp: Sprite, quad, alpha=1.0):
         """Perspective-warp a sprite onto 4 design points (tl, tr, br, bl)."""
-        quad = (np.asarray(quad, np.float64) + self.off) * self.S
+        quad = np.array([self._tp(px_, py_) for px_, py_ in np.asarray(quad, np.float64)]) * self.S
+        alpha *= self.fade
         # pick a mip level from the largest edge
         need_w = max(np.linalg.norm(quad[1] - quad[0]), np.linalg.norm(quad[2] - quad[3])) / sp.w
         img, ppd = sp.pick(need_w)
@@ -279,6 +303,9 @@ class Canvas:
         H = cv2.getPerspectiveTransform(srcq, np.float32(quad - (x0, y0)))
         src = cv2.warpPerspective(img, H, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR,
                                   borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
+        rm = self._region_mask(x0, x1)
+        if rm is not None:
+            src *= rm[None, :, None]
         if alpha < 1:
             src *= alpha
         dst = self._target()[y0:y1, x0:x1]
@@ -293,13 +320,19 @@ class Canvas:
         Rasterised with OpenCV's 8-bit anti-aliased lines at 1/16 px precision
         into an ROI, then added to a float light layer.
         """
-        pts = (np.asarray(pts, np.float64) + self.off) * self.S
+        pts = np.asarray(pts, np.float64)
+        if len(pts) < 2:
+            return
+        cx, cy = self.W / self.S / 2, self.H / self.S / 2
+        pts = np.stack([cx + (pts[:, 0] + self.off[0] - cx) * self.zoom,
+                        cy + (pts[:, 1] + self.off[1] - cy) * self.zoom], 1) * self.S
+        width = width * self.zoom
         if len(pts) < 2:
             return
         colors = np.asarray(colors, np.float32)
         if colors.ndim == 1:
             colors = np.repeat(colors[None], len(pts), 0)
-        intens = np.asarray(intens, np.float32)
+        intens = np.asarray(intens, np.float32) * self.fade
         if intens.ndim == 0:
             intens = np.full(len(pts), float(intens), np.float32)
         th = max(1, int(round(width * self.S)))
@@ -322,14 +355,19 @@ class Canvas:
             cv2.line(roi, (int(q[i, 0]), int(q[i, 1])), (int(q[i + 1, 0]), int(q[i + 1, 1])),
                      (float(v[0]), float(v[1]), float(v[2])), th, cv2.LINE_AA, 4)
         f = roi.astype(np.float32) * (LMAX / 255.0)
+        rm = self._region_mask(x0, x1)
+        if rm is not None:
+            f *= rm[None, :, None]
         if occlude > 0:
             f *= (1 - occlude * self.ui[y0:y1, x0:x1, 3:4])
         (self.over if layer == "over" else self.under)[y0:y1, x0:x1] += f
         self._touch("over" if layer == "over" else "under", x0, y0, x1, y1)
 
     def light_dot(self, p, color, energy=1.5, radius=4.0, layer="over"):
-        x, y = (p[0] + self.off[0]) * self.S, (p[1] + self.off[1]) * self.S
-        r = max(1.0, radius * self.S)
+        x, y = self._tp(p[0], p[1])
+        x, y = x * self.S, y * self.S
+        r = max(1.0, radius * self.S * self.zoom)
+        energy = energy * self.fade
         x0, y0 = int(max(0, x - r - 3)), int(max(0, y - r - 3))
         x1, y1 = int(min(self.W, x + r + 4)), int(min(self.H, y + r + 4))
         if x1 <= x0 or y1 <= y0:
@@ -338,7 +376,11 @@ class Canvas:
         v = np.clip(np.asarray(color) * energy / LMAX * 255, 0, 255)
         cv2.circle(roi, (int(round((x - x0) * 16)), int(round((y - y0) * 16))), int(round(r * 16)),
                    tuple(float(c) for c in v), -1, cv2.LINE_AA, 4)
-        (self.over if layer == "over" else self.under)[y0:y1, x0:x1] += roi.astype(np.float32) * (LMAX / 255.0)
+        f = roi.astype(np.float32) * (LMAX / 255.0)
+        rm = self._region_mask(x0, x1)
+        if rm is not None:
+            f *= rm[None, :, None]
+        (self.over if layer == "over" else self.under)[y0:y1, x0:x1] += f
         self._touch("over" if layer == "over" else "under", x0, y0, x1, y1)
 
     def light_path(self, path: Path, head, tail=0.35, color="#3186FF", color_tail=None,

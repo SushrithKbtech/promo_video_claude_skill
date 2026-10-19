@@ -107,11 +107,15 @@ def _peak1(x):
     return x / p if p > 1e-9 else x
 
 
+KIT = dict(kick_f=46.0, kick_dec=0.32, snare_p=1.0, hat_f=9500.0, clap_f=1300.0, hat_dec=0.028)
+
+
 def kick(vel=1.0, hard=False, soft=False):
     n = N(0.5)
     t = np.arange(n) / SR
-    f = 46 + (80 if soft else 120) * np.exp(-t / 0.028) + (200 if soft else 600) * np.exp(-t / 0.0025)
-    m = sine(f, n) * np.exp(-t / (0.32 if not hard else 0.4))
+    kf = KIT["kick_f"]
+    f = kf + (80 if soft else 120) * np.exp(-t / 0.028) + (200 if soft else 600) * np.exp(-t / 0.0025)
+    m = sine(f, n) * np.exp(-t / (KIT["kick_dec"] if not hard else KIT["kick_dec"] + 0.08))
     if not soft:
         m += filt(noise(n, 1) * expdec(n, 0.0015), "bp", 3500, q=0.8) * 0.4
     return sat(m * 1.4, 1.6) * vel
@@ -126,7 +130,7 @@ def clap(vel=1.0, seed=2):
         j = N(d)
         env[j:] += np.exp(-(t[:n - j]) / 0.005) * (0.8 if d < 0.028 else 1.0)
     env += np.exp(-np.maximum(0, t - 0.028) / 0.14) * (t > 0.028) * 0.55
-    m = filt(filt(nz * env, "bp", 1300, q=0.7), "hp", 500)
+    m = filt(filt(nz * env, "bp", KIT["clap_f"], q=0.7), "hp", 500)
     return m * 1.6 * vel
 
 
@@ -147,6 +151,7 @@ def rim(vel=1.0):
 def snare(vel=1.0, pitch=1.0, seed=3, tail=0.18):
     n = N(0.6)
     t = np.arange(n) / SR
+    pitch = pitch * KIT["snare_p"]
     body = (sine(185 * pitch, n) * 0.7 + sine(330 * pitch, n) * 0.35) * np.exp(-t / 0.06)
     nz = filt(noise(n, seed), "hp", 1400) * np.exp(-t / tail)
     return sat((body + nz * 0.9) * vel, 1.3)
@@ -159,8 +164,8 @@ def hat(vel=1.0, open_=False):
     n = N(0.4 if open_ else 0.09)
     t = np.arange(n) / SR
     m = sum(square(f * 2.2, n, i * 0.17) for i, f in enumerate(_HAT_F)) / 6
-    m = filt(filt(m, "bp", 9500, q=0.9), "hp", 7000, order=2)
-    m *= np.exp(-t / (0.16 if open_ else 0.028)) * np.clip(t / 0.0008, 0, 1)
+    m = filt(filt(m, "bp", KIT["hat_f"], q=0.9), "hp", 7000, order=2)
+    m *= np.exp(-t / (0.16 if open_ else KIT["hat_dec"])) * np.clip(t / 0.0008, 0, 1)
     return _peak1(m) * 0.9 * vel
 
 
@@ -372,6 +377,11 @@ class Score:
         self.arp = ARP_PATTERNS[int(r.integers(len(ARP_PATTERNS)))]
         self.arp_rate = self.st["arp_rates"][int(r.integers(len(self.st["arp_rates"])))]
         self.var = int(r.integers(0, 4))
+        # every product gets its own drum kit tuning
+        self.kit = dict(kick_f=float(r.uniform(42, 56)), kick_dec=float(r.uniform(0.26, 0.42)),
+                        snare_p=float(r.uniform(0.85, 1.15)), hat_f=float(r.uniform(8000, 11000)),
+                        clap_f=float(r.uniform(1000, 1700)), hat_dec=float(r.uniform(0.02, 0.04)))
+        KIT.update(self.kit)
         self.octave = int(r.choice([12, 12, 24])) if self.mood not in ("acoustic", "chill") else 12
         self.bar = 240.0 / plan["bpm"]
         self.step = self.bar / 16
@@ -384,7 +394,8 @@ class Score:
 
     def describe(self):
         return dict(mood=self.mood, key_offset=self.key_offset, lead=self.lead, arp=self.arp,
-                    arp_rate=self.arp_rate, drum_variation=self.var)
+                    arp_rate=self.arp_rate, drum_variation=self.var,
+                    kit={k: round(v, 3) for k, v in self.kit.items()})
 
     def st_t(self, tb, s):
         """Time of 16th step s in the bar starting at tb, with swing on the off 8ths."""

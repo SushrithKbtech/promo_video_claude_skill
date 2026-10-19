@@ -68,7 +68,8 @@ class Scene:
         self.color = film.light_color(c) if isinstance(c, int) else c
         self.facet = spec.get("facet", idx)
         self.transition = spec.get("transition", "light")
-        self.land = a if idx == 0 else a + (0.22 if self.transition in ("whip", "cut") else self.handover)
+        self.land = a if idx == 0 else a + (0.22 if self.transition in ("whip", "cut") else
+                                            0.3 if self.transition in ("wipe", "push") else self.handover)
         self.prev = None
         self.next = None
         self.fit = 1.0
@@ -1769,6 +1770,126 @@ def _ellipse_sprite(sc, w, h, color):
     p = ui.Painter(w, h, sc.ppd, sc.fonts)
     p.d.ellipse([0, 0, w * p.k - 1, h * p.k - 1], fill=ui._rgba(color))
     return p.sprite()
+
+
+# ===========================================================================
+# signature (the product's motif as a hero moment)
+# ===========================================================================
+
+@register("signature")
+class Signature(Scene):
+    """The product's own shape, drawn by the light across the whole frame like a live monitor
+    trace (heartbeat, sound wave, circuit, route...). Older trace fades behind a hot head; every
+    event in the motif (a spike, a node, a pin) flashes a ripple and makes its sound.
+
+    data: {"lines": ["Every second", "counts."], "highlight": "counts.", "kind": "ecg"}
+    (kind defaults to the film's brief.signature)
+    """
+    weight = 1.3
+
+    def setup(self):
+        from .motifs import beats, motif_points
+        f, d = self.f, self.data
+        self.motif = d.get("kind") or (f.signature if f.signature != "none" else "wave")
+        self.lines = d.get("lines") or []
+        self.hl = (d.get("highlight") or "").lower().strip(".,!?")
+        has_text = bool(self.lines)
+        self.y = f.CY + (110 if has_text and not f.portrait else 160 if has_text else 0)
+        x0, x1 = 70.0, f.DW - 70.0
+        amp = {"ecg": 150.0, "wave": 95.0, "ripple": 80.0, "route": 170.0, "spark": 110.0, "rise": 230.0}.get(self.motif)
+        if self.motif == "rise":
+            p0, p1 = (x0, self.y + 120), (x1, self.y - 140)
+        else:
+            p0, p1 = (x0, self.y), (x1, self.y)
+        # a real heart rhythm: about three beats across the frame
+        self.period = (f.DW - 140) / 3.3 if self.motif == "ecg" else None
+        self.pts = motif_points(self.motif, p0, p1, amp=amp, seed=self.i + 17, envelope=self.motif != "ecg",
+                                period=self.period)
+        self.path = Path(self.pts)
+        self.t0 = self.land + 0.05
+        self.key = max(self.a + 0.78 * self.L, self.t0 + 1.4)
+        self.events = beats(self.motif, p0, p1, seed=self.i + 17, period=self.period)
+        # type: one or two short lines above the trace, word by word
+        self.size = 84.0 if not f.portrait else 66.0
+        if self.lines:
+            wmax = max(f.type.width(l, self.size, 700) for l in self.lines)
+            if wmax > f.DW * 0.86:
+                self.size *= f.DW * 0.86 / wmax
+        self.words = []
+        lh = self.size * 1.12
+        top = self.y - 150 - lh * (len(self.lines) - 1)
+        t = self.land + 0.25
+        for li, line in enumerate(self.lines):
+            lw = f.type.width(line, self.size, 700)
+            x = f.CX - lw / 2
+            for w in line.split(" "):
+                self.words.append(dict(w=w, x=x, y=top + li * lh, t=t))
+                x += f.type.width(w + " ", self.size, 700)
+                t += 0.09
+
+    def u_at(self, t):
+        return ease_in_out(ramp(t, self.t0, self.key), 1.35)
+
+    def event_times(self):
+        ts = np.linspace(self.t0, self.key, 600)
+        us = np.array([self.u_at(t) for t in ts])
+        return [float(ts[min(len(ts) - 1, int(np.searchsorted(us, e)))]) for e in self.events]
+
+    def entry(self):
+        return tuple(self.pts[0])
+
+    def exit(self):
+        return tuple(self.pts[-1])
+
+    def anchors(self):
+        a = {"key": self.key}
+        for i, te in enumerate(self.event_times()):
+            a[f"e{i + 1}"] = te
+        return a
+
+    def cues(self):
+        kind = {"ecg": "beep", "circuit": "tick", "route": "pop", "wave": "shimmer", "ripple": "pop_soft",
+                "spark": "sparkle", "rise": "tick"}.get(self.motif, "tick")
+        c = [dict(t=te, kind=kind, gain=-17, pitch=1.0 + 0.04 * i) for i, te in enumerate(self.event_times())]
+        c += [dict(t=w["t"], kind="tick", gain=-29, pitch=0.8) for w in self.words]
+        c.append(dict(t=self.key, kind="success", gain=-17))
+        return c
+
+    def draw(self, cv, t):
+        f = self.f
+        out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
+        if out <= 0 or t < self.land - 0.05:
+            return
+        u = self.u_at(t)
+        col = lin(self.color)
+        n = len(self.pts)
+        if u > 0:
+            # the trace: older parts dim like a monitor, the newest part burns
+            m = max(2, int(n * u))
+            seg = self.pts[:m]
+            age = np.linspace(0, 1, m)
+            inten = (0.18 + 0.55 * age ** 2.2) * out
+            if t > self.key:
+                inten = np.maximum(inten, 0.32 * out)
+            cv.light_poly(seg, col, inten, width=4.2)
+            if t <= self.key + 0.05:
+                cv.light_path(self.path, u, tail=0.06, color=self.color, width=5.0, energy=1.35 * out, head_glow=1.3)
+        # each event flashes a ripple where it happens
+        for e, te in zip(self.events, self.event_times()):
+            k = ramp(t, te, te + 0.6)
+            if 0 < k < 1:
+                p = self.path.at(e)
+                rr = ease_out(k, 2.2)
+                ring = [(p[0] + 70 * rr * math.cos(a_), p[1] + 70 * rr * math.sin(a_)) for a_ in np.linspace(0, 6.3, 64)]
+                cv.light_poly(ring, col, 0.9 * (1 - k) * out, width=3.4)
+                cv.light_dot(p, col, energy=1.6 * (1 - k) * out, radius=7)
+        for w in self.words:
+            a = ease_out(ramp(t, w["t"], w["t"] + 0.3), 2.6)
+            if a <= 0:
+                continue
+            is_hl = self.hl and w["w"].lower().strip(".,!?") == self.hl
+            sp = self.text(w["w"], self.size, 700, self.color if is_hl else f.text_color)
+            cv.draw(sp, w["x"], w["y"] + 22 * (1 - a), alpha=a * out, blur=4 * (1 - a), anchor=(0, sp.baseline / sp.h))
 
 
 # ===========================================================================

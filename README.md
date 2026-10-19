@@ -87,10 +87,18 @@ guitar, glass, strings) and drum patterns. About 50 designed sound effects; a vo
 every key word lands on its beat; ducking; mastered to -14 LUFS with true peak below -1 dBTP. Or
 bring your own track: the engine finds its BPM and drop and lands the logo hit on it.
 
+**Made for the product:** the light takes the product's own shape (a heartbeat for health, a sound
+wave for audio, circuit traces for dev tools, a route for maps and delivery, a climbing line for
+finance) in every transition and in a hero moment, and the sound effects come from a palette that
+fits (organic, digital, cinematic, soft, punchy, mechanical, clean), tuned per product.
+
+**You approve the plan:** before rendering, Claude shows a short storyboard (format, scenes, script,
+music, voice) and you say yes or change anything.
+
 **No two films alike:** six film formats with different shapes (journey, keynote, launch, story,
 showcase, reel), four endings (lights race into the logo, an understated reveal, a hard cut, the
-name written by light), logo-first or cold openings, two hooks, light or dark stages, 12 scenes plus
-custom ones, four transition types, a score composed per product, and a history of past films so
+name written by light), logo-first or cold openings, two hooks, light or dark stages, 13 scenes plus
+custom ones, six transition types (light hand-over, whip, cut, wipe, push, morph), a score composed per product, and a history of past films so
 the director changes the recipe every time.
 
 ## How it works

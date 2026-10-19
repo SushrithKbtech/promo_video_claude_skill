@@ -243,6 +243,16 @@ def digital(seed=14):
     return w, 0.0
 
 
+def beep(pitch=1.0):
+    """Heart-monitor beep."""
+    n = N(0.16)
+    t = np.arange(n) / SR
+    env = np.clip(t / 0.006, 0, 1) * np.where(t < 0.085, 1.0, np.exp(-(t - 0.085) / 0.02))
+    m = (sine(965 * pitch, n) + 0.18 * sine(1930 * pitch, n)) * env * 0.5
+    st = stereo(m)
+    return st + reverb(st, 0.8, 0.12), 0.0
+
+
 def breath(dur=0.6, seed=15):
     st, _ = riser(dur, seed, tone=False)
     st = filt(st, "lp", 2500)
@@ -276,10 +286,11 @@ SFX = {
     "swirl": lambda c: swirl(c.get("dur", 1.3)),
     "digital": lambda c: digital(),
     "breath": lambda c: breath(c.get("dur", 0.6)),
+    "beep": lambda c: beep(c.get("pitch", 1.0)),
 }
 
 
-def render_cues(cues, total_s, dark=False):
+def render_cues(cues, total_s, dark=False, palette=None):
     out = np.zeros((N(total_s + 3), 2))
     for c in cues:
         fn = SFX.get(c["kind"])
@@ -287,12 +298,129 @@ def render_cues(cues, total_s, dark=False):
             continue
         if c["kind"] == "impact" and dark:
             c = {**c, "dark": True}
-        clip, off = fn(c)
+        rep = palette.replace(c["kind"], c) if palette else None
+        clip, off = rep if rep is not None else fn(c)
         if clip.ndim == 1:
             clip = stereo(clip)
+        if palette:
+            clip, off = palette.voice(c["kind"], clip, off)
         pan = c.get("pan", 0.0)
         if pan and c["kind"] not in ("whoosh_short",):
             a = (pan + 1) * math.pi / 4
             clip = clip * np.array([math.cos(a), math.sin(a)]) * math.sqrt(2)
         place(out, clip, c["t"] - off, 10 ** (c.get("gain", -12) / 20))
     return out
+
+
+# ---------------------------------------------------------------------------
+# palettes: the same cue list sounds different for every product
+# ---------------------------------------------------------------------------
+
+PALETTES = {
+    # name: pitch, brightness dB (high shelf @3.5 kHz), room (rt60, mix), drive, lowpass, character
+    "clean": dict(pitch=1.0, bright=1.5, room=(1.2, 0.10), drive=1.0, lp=None, char=None),
+    "punchy": dict(pitch=0.94, bright=2.5, room=(0.9, 0.08), drive=1.6, lp=None, char="punch"),
+    "organic": dict(pitch=0.9, bright=-2.0, room=(1.6, 0.16), drive=1.0, lp=9000, char="wood"),
+    "soft": dict(pitch=1.08, bright=-4.0, room=(2.0, 0.2), drive=1.0, lp=6500, char="bubble"),
+    "digital": dict(pitch=1.12, bright=3.0, room=(0.7, 0.07), drive=1.3, lp=None, char="crush"),
+    "cinematic": dict(pitch=0.82, bright=0.0, room=(3.2, 0.24), drive=1.4, lp=None, char="boom"),
+    "mechanical": dict(pitch=0.88, bright=1.0, room=(1.0, 0.1), drive=1.5, lp=None, char="servo"),
+}
+MOOD_PALETTE = {"hype": "punchy", "uplifting": "clean", "dark": "cinematic", "cinematic": "cinematic", "epic": "cinematic",
+                "chill": "soft", "house": "clean", "acoustic": "organic", "minimal": "digital"}
+UI_KINDS = {"tick", "click", "select", "key", "pop", "pop_soft", "pop_low", "confirm", "beep"}
+MOVE_KINDS = {"whoosh_soft", "whoosh_hit", "whoosh_short", "whoosh_fast", "swoosh", "swirl", "send", "air"}
+
+
+class Palette:
+    """A product's sound: a base palette plus seeded variation (pitch, colour, room, timbre)."""
+
+    def __init__(self, name="clean", seed=0):
+        self.name = name if name in PALETTES else "clean"
+        base = dict(PALETTES[self.name])
+        r = np.random.default_rng(seed)
+        self.pitch = base["pitch"] * r.uniform(0.9, 1.1)
+        self.bright = base["bright"] + r.uniform(-1.5, 1.5)
+        self.rt60 = base["room"][0] * r.uniform(0.8, 1.25)
+        self.mix = base["room"][1] * r.uniform(0.75, 1.3)
+        self.drive = base["drive"]
+        self.lp = base["lp"]
+        self.char = base["char"]
+        self.ui_pitch = r.uniform(0.8, 1.25)       # UI sounds get their own tuning
+        self.wood_modes = r.uniform(0.9, 1.1, 3) * np.array([1.0, 2.76, 5.4])
+
+    def describe(self):
+        return dict(palette=self.name, pitch=round(self.pitch, 3), bright=round(self.bright, 1),
+                    room=round(self.rt60, 2), char=self.char)
+
+    # characters that replace a sound outright
+    def replace(self, kind, c):
+        p = c.get("pitch", 1.0) * self.ui_pitch
+        if self.char == "wood" and kind in ("tick", "click", "select", "key", "pop", "pop_soft"):
+            return _wood(p * (0.8 if kind == "key" else 1.0), self.wood_modes, soft=kind == "key")
+        if self.char == "bubble" and kind in ("tick", "pop", "pop_soft", "select", "click"):
+            return _bubble(p)
+        if self.char == "crush" and kind in ("tick", "click", "select", "pop", "pop_soft", "confirm"):
+            return _zap(p)
+        return None
+
+    def voice(self, kind, clip, off):
+        """Re-voice a generated clip: pitch, colour, drive, character layers, room."""
+        x = clip
+        pf = self.pitch * (self.ui_pitch if kind in UI_KINDS else 1.0)
+        if abs(pf - 1.0) > 0.01:
+            n = len(x)
+            m = max(2, int(n / pf))
+            idx = np.linspace(0, n - 1, m)
+            x = np.stack([np.interp(idx, np.arange(n), x[:, ch]) for ch in range(2)], 1)
+            off = off / pf
+        if abs(self.bright) > 0.2:
+            x = filt(x, "highshelf", 3500, 0.7, self.bright)
+        if self.lp:
+            x = filt(x, "lp", self.lp)
+        if self.drive > 1.05:
+            x = sat(x * self.drive, 1.0) / self.drive * 1.2
+        if self.char == "crush" and kind in UI_KINDS | {"transient"}:
+            step = 6
+            x = np.repeat(x[::step], step, axis=0)[:len(x)]
+            x = np.round(x * 48) / 48
+        if self.char == "servo" and kind in MOVE_KINDS:
+            n = len(x)
+            t = np.arange(n) / SR
+            f = 180 + 420 * np.sin(np.pi * np.clip(t / (n / SR), 0, 1))
+            whine = saw(f, n) * 0.05 * np.sin(np.pi * np.clip(t / (n / SR), 0, 1)) ** 2
+            x = x + stereo(filt(whine, "bp", 900, q=1.2))
+        if self.char == "boom" and kind in ("impact", "whoosh_hit", "transient"):
+            n = len(x)
+            t = np.arange(n) / SR
+            boom = sine(38 + 20 * np.exp(-t / 0.2), n) * np.exp(-t / 1.2) * 0.5
+            x = x + stereo(sat(boom, 1.5))
+        if self.char == "punch" and kind in ("impact", "transient", "whoosh_hit"):
+            x = sat(x * 1.6, 1.2)
+        x = x + reverb(x, self.rt60, self.mix)
+        return x, off
+
+
+def _wood(pitch, modes, soft=False):
+    n = N(0.25)
+    t = np.arange(n) / SR
+    f0 = 880 * pitch
+    m = sum(sine(f0 * k, n) * np.exp(-t / (0.06 / (i + 1))) * (0.9 / (i + 1)) for i, k in enumerate(modes))
+    m += filt(noise(n, int(pitch * 100)) * expdec(n, 0.003), "bp", f0 * 2, q=3) * 0.4
+    return stereo(m * (0.4 if soft else 0.6)), 0.0
+
+
+def _bubble(pitch):
+    n = N(0.14)
+    t = np.arange(n) / SR
+    f = 500 * pitch * (1 + 1.4 * (1 - np.exp(-t / 0.03)))
+    m = sine(f, n) * np.sin(np.pi * np.clip(t / 0.12, 0, 1)) ** 1.5
+    return stereo(m * 0.5), 0.0
+
+
+def _zap(pitch):
+    n = N(0.09)
+    t = np.arange(n) / SR
+    f = 2400 * pitch * np.exp(-t / 0.03) + 300
+    m = square(f, n, pw=0.4) * np.exp(-t / 0.025) * 0.35
+    return stereo(m), 0.0

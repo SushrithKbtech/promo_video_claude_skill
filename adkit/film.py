@@ -115,6 +115,7 @@ class Film:
         self.hit_bar = max(4, int(round((dur - 4.4 - self.d0) / self.bar)))
         self.slam = self.D(0)
         self.hit = self.D(self.hit_bar)
+        self.signature = b.get("signature", "none")      # the shape the light takes (motifs.py)
         self.ending = b.get("ending", "race")
         if self.ending not in ENDINGS:
             self.ending = "race"
@@ -512,6 +513,11 @@ class Film:
             return self._sprites["cold"]
         W, H = self.DW, self.DH
         tgt = np.array(self.scenes[0].entry(), float)
+        if self.signature != "none":
+            from .motifs import motif_points
+            paths = [Path(motif_points(self.signature, (-0.04 * W, tgt[1]), tgt, seed=5))]
+            self._sprites["cold"] = paths
+            return paths
         starts = [((-0.10 * W, 0.04 * H), (0.22 * W, 0.0)), ((1.10 * W, 0.30 * H), (0.86 * W, 0.22 * H)),
                   ((0.04 * W, 1.10 * H), (0.14 * W, 0.78 * H))]
         paths = []
@@ -533,6 +539,13 @@ class Film:
         k = xf["h"] / self.logo.design_h
         start = np.array([xf["cx"], xf["cy"]]) + self.logo.facets[fi % len(self.logo.facets)]["center"] * k
         mid = np.array([max(start[0], target[0]) + 260, (start[1] + target[1]) / 2 + 40])
+        if self.signature != "none":
+            from .motifs import motif_points
+            out = start + np.array([0.0, 40.0])
+            arc = Path.beziers([(start, start + (60, 30), out + (-40, 10), out)]).span(0, 1, 40)
+            p = Path(np.vstack([arc, motif_points(self.signature, out, target, seed=99)[1:]]))
+            self._sprites["peel"] = p
+            return p
         p = Path.beziers([(start, start + (180, -60), mid + (40, -140), mid),
                           (mid, mid + (-40, 140), target + (220, 10), target)])
         self._sprites["peel"] = p
@@ -548,7 +561,7 @@ class Film:
     def draw_handovers(self, cv, t):
         for i in range(len(self.scenes) - 1):
             a, b = self.scenes[i], self.scenes[i + 1]
-            if b.transition in ("whip", "cut"):
+            if b.transition in ("whip", "cut", "wipe", "push"):
                 continue
             t0 = b.a - 0.05
             t1 = b.land
@@ -557,7 +570,10 @@ class Film:
             key = ("ho", i)
             if key not in self._sprites:
                 p0, p1 = np.array(a.exit(), float), np.array(b.entry(), float)
-                if np.linalg.norm(p1 - p0) < 520:
+                if self.signature != "none" and np.linalg.norm(p1 - p0) >= 300:
+                    from .motifs import motif_points
+                    self._sprites[key] = Path(motif_points(self.signature, p0, p1, seed=i))
+                elif np.linalg.norm(p1 - p0) < 520:
                     # too short to read as a move: swoop out in an arc and come back in
                     lift = np.array([0.0, -330.0]) if p0[1] > self.DH * 0.3 else np.array([0.0, 330.0])
                     sx = 260.0 if p1[0] >= p0[0] else -260.0
@@ -630,13 +646,27 @@ class Film:
         prog = ease_out(ramp(lt, 0, 0.55), 2.5)
         cols = self.brief.get("end_line_colors") or self.palette[:3]
         n = len(cols)
-        for i, c in enumerate(cols):
-            a0, a1 = i / n, (i + 1) / n
-            if prog <= a0:
-                continue
-            e = min(prog, a1)
-            pts = [(x0 + L * a0 + (2 if i else 0), y_line), (x0 + L * e - (2 if i < n - 1 and e == a1 else 0), y_line)]
-            cv.light_poly(pts, lin(c), 0.85 * fade, width=4.0)
+        if self.signature not in ("none", "circuit", "rise"):
+            from .motifs import motif_points
+            key = "endmotif"
+            if key not in self._sprites:
+                self._sprites[key] = motif_points(self.signature, (x0, y_line), (x0 + L, y_line), amp=26, seed=3,
+                                                  n=400, envelope=self.signature != "ecg")
+            mp = self._sprites[key]
+            m = max(2, int(len(mp) * prog))
+            seg = len(mp) / n
+            for i, c in enumerate(cols):
+                a, b2 = int(i * seg), min(m, int((i + 1) * seg) + 1)
+                if b2 - a >= 2:
+                    cv.light_poly(mp[a:b2], lin(c), 0.85 * fade, width=4.0)
+        else:
+            for i, c in enumerate(cols):
+                a0, a1 = i / n, (i + 1) / n
+                if prog <= a0:
+                    continue
+                e = min(prog, a1)
+                pts = [(x0 + L * a0 + (2 if i else 0), y_line), (x0 + L * e - (2 if i < n - 1 and e == a1 else 0), y_line)]
+                cv.light_poly(pts, lin(c), 0.85 * fade, width=4.0)
         g = (lt * 0.55) % 1.4
         if g < 1.0 and prog > 0.99:
             gx = x0 + L * g
@@ -743,6 +773,62 @@ class Film:
             off += self.DW * 1.25 * (1.0 - ease_out(ramp(t, sc.a, sc.a + 0.2), 2.6))
         return off
 
+    WIPE = 0.45
+
+    def wipe_x(self, sc, t):
+        """x of the wiping line of light for an incoming 'wipe' scene (None outside the wipe)."""
+        t0 = sc.a - 0.05
+        if not (t0 <= t <= t0 + self.WIPE):
+            return None
+        return lerp(-40.0, self.DW + 40.0, ease_in_out(ramp(t, t0, t0 + self.WIPE), 2.2))
+
+    def transition_state(self, sc, t):
+        """(zoom, fade, region) for a scene at t, from wipe / push transitions; None = hidden."""
+        zoom, fade, region = 1.0, 1.0, None
+        nxt = sc.next
+        if nxt is not None and nxt.transition == "wipe":
+            t0 = nxt.a - 0.05
+            if t >= t0 + self.WIPE:
+                return None
+            x = self.wipe_x(nxt, t)
+            if x is not None:
+                region = (x, self.DW + 100.0)
+        if sc.transition == "wipe" and sc.i > 0:
+            t0 = sc.a - 0.05
+            if t < t0:
+                return None
+            x = self.wipe_x(sc, t)
+            if x is not None:
+                region = (-100.0, x)
+        if nxt is not None and nxt.transition == "push" and t >= nxt.a - 0.3:
+            k = ramp(t, nxt.a - 0.3, nxt.a)
+            if k >= 1:
+                return None
+            zoom *= 1 + 0.6 * ease_in(k, 2.0)
+            fade *= 1 - smooth(k)
+        if sc.transition == "push" and sc.i > 0:
+            if t < sc.a - 0.02:
+                return None
+            k = ease_out(ramp(t, sc.a - 0.02, sc.a + 0.35), 2.6)
+            zoom *= 0.86 + 0.14 * k
+            fade *= smooth(ramp(t, sc.a - 0.02, sc.a + 0.25))
+        return zoom, fade, region
+
+    def draw_wipes(self, cv, t):
+        for sc in self.scenes:
+            if sc.transition != "wipe" or sc.i == 0:
+                continue
+            x = self.wipe_x(sc, t)
+            if x is None:
+                continue
+            k = ramp(t, sc.a - 0.05, sc.a - 0.05 + self.WIPE)
+            e = math.sin(math.pi * k)
+            cv.light_poly([(x, -20), (x, self.DH + 20)], lin(sc.color), 1.2 * e + 0.2, width=5.0)
+            cv.light_poly([(x - 18, -20), (x - 18, self.DH + 20)], lin(sc.color), 0.25 * e, width=12.0)
+
+    def push_blur(self, t):
+        return sum(3.0 * math.exp(-((t - sc.a) / 0.09) ** 2) for sc in self.scenes if sc.transition == "push" and sc.i)
+
     def whip_blur(self, t):
         return sum(130 * math.exp(-((t - sc.a) / 0.07) ** 2) for sc in self.scenes if sc.transition == "whip" and sc.i)
 
@@ -781,8 +867,14 @@ class Film:
                 if sc.transition == "cut" and t < sc.a:
                     continue
                 cv.off = (self.whip_offset(sc, t), 0.0)
+                st = self.transition_state(sc, t)
+                if st is None:
+                    cv.off = (0.0, 0.0)
+                    continue
+                cv.zoom, cv.fade, cv.region = st
                 sc.draw(cv, t)
-                cv.off = (0.0, 0.0)
+                cv.off, cv.zoom, cv.fade, cv.region = (0.0, 0.0), 1.0, 1.0, None
+        self.draw_wipes(cv, t)
         self.draw_peel(cv, t)
         self.draw_handovers(cv, t)
         self.draw_race(cv, t)
@@ -791,6 +883,9 @@ class Film:
         self.draw_end(cv, t)
         self.draw_captions(cv, t)
         img = cv.composite()
+        pb = self.push_blur(t)
+        if pb > 0.3:
+            img = cv2.GaussianBlur(img, (0, 0), pb * self.S)
         wb = self.whip_blur(t)
         if wb > 0.6:
             k = max(3, int(wb * self.S) | 1)
@@ -822,6 +917,10 @@ class Film:
                 continue
             if sc.transition == "whip":
                 c += [dict(t=sc.a, kind="whoosh_fast", gain=-11), dict(t=sc.a + 0.05, kind="transient", gain=-16)]
+            elif sc.transition == "wipe":
+                c += [dict(t=sc.a - 0.05, kind="swoosh", gain=-14, dur=0.55), dict(t=sc.a + 0.15, kind="shimmer", gain=-22)]
+            elif sc.transition == "push":
+                c += [dict(t=sc.a - 0.05, kind="whoosh_hit", gain=-12), dict(t=sc.a, kind="pop_low", gain=-17)]
             elif sc.transition == "cut":
                 c.append(dict(t=sc.a, kind="transient", gain=-14))
             else:
@@ -846,7 +945,33 @@ class Film:
             c += [dict(t=self.hit + 0.05, kind="whoosh_soft", gain=-18), dict(t=self.hit + 0.8, kind="pop_low", gain=-17),
                   dict(t=self.hit + 0.85, kind="shimmer", gain=-20)]
         c.append(dict(t=self.end_t + 0.05, kind="sparkle", gain=-22))
+        c += self._motif_cues()
         return sorted(c, key=lambda d: d["t"])
+
+    def _motif_cues(self):
+        if self.signature in ("none", "rise"):
+            return []
+        from .motifs import beats
+        kind = {"ecg": "beep", "circuit": "tick", "route": "pop_soft", "wave": "shimmer", "ripple": "pop_soft",
+                "spark": "sparkle"}.get(self.signature, "tick")
+        out = []
+        for i in range(len(self.scenes) - 1):
+            a, b = self.scenes[i], self.scenes[i + 1]
+            if b.transition in ("whip", "cut", "wipe", "push"):
+                continue
+            p0, p1 = np.array(a.exit(), float), np.array(b.entry(), float)
+            if np.linalg.norm(p1 - p0) < 300:
+                continue
+            t0, t1 = b.a - 0.05, b.land
+            ts = np.linspace(t0, t1, 400)
+            us = np.array([ease_in_out(ramp(t, t0, t1), 2.0) for t in ts])
+            last = -9.0
+            for f in beats(self.signature, p0, p1, seed=i):
+                j = int(np.searchsorted(us, f))
+                if j < len(ts) and ts[j] - last >= 0.3:   # never machine-gun the beeps
+                    out.append(dict(t=float(ts[j]), kind=kind, gain=-21, pitch=1.0))
+                    last = ts[j]
+        return out
 
     def music_plan(self):
         return dict(bpm=self.bpm, d0=self.d0, slam=self.slam, drop=self.drop, breath=self.hit - 0.6,

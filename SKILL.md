@@ -10,8 +10,10 @@ film. Everything is drawn by code (Python + ffmpeg). No AI video, no stock foota
 
 The user gives you as little as a name or URL ("make one for linear.app") or as much as a
 full brief (script, length, 9:16, dark, "Apple style" music, their own track, their
-screenshots). Fill every gap yourself with taste. Do not interview them. Ask one question
-only if you cannot tell what the product is.
+screenshots). Fill every gap yourself with taste: do not interview them with a list of questions.
+Instead, research the product, design a complete film, and propose it as a short storyboard they
+can approve with one click or change (Step 2). Only if you cannot tell what the product is, ask
+that first.
 
 ---
 
@@ -93,12 +95,15 @@ folder (put it where the user works, e.g. `./promo-<product>/`) holding `brief.j
   Never type into, sign up on, or submit forms on someone else's live site to get a screen; ask
   the user for screenshots instead. Fill only fictional data when a screen needs content.
 
-### Step 2: direct the film (show the user this beat sheet before rendering)
+### Step 2: direct the film, then PROPOSE it and ask
 
 Decide, in this order:
 
 0. **Film format:** the shape of the film (`journey`, `keynote`, `launch`, `story`, `showcase`,
    `reel`; section 3). Pick from the product and the user's words, and not the one used last time.
+0b. **Signature:** the shape the light takes, from what the product *is* (section 3, "Signature").
+   A health product's light is a heartbeat; an audio product's is a sound wave. Plan one hero
+   moment with the `signature` scene when it fits the story.
 1. **Size and length:** duration (default 21.8 s; 15 s for social cut-downs, 30 s for launches),
    aspect (16:9 default; 9:16 for Reels/TikTok/Shorts, captions turn on automatically), 60 fps.
 2. **Look:** `stage.mode` light (clean SaaS, productivity, consumer) or dark (dev tools, AI,
@@ -108,10 +113,12 @@ Decide, in this order:
 4. **The jobs:** turn the product into 3-5 verbs, one scene each (table below). Mix scene types;
    never the same scene twice in a row. End on `devices` when the product is multi-platform,
    otherwise on the strongest proof (`chart`, `features`, `product`).
-5. **Transitions:** default is the light hand-over (the light flies from one scene into the next
-   and changes colour along its tail). Use `"transition": "whip"` for energy (max two per film) and
-   `"cut"` for a hard punch on a beat. Containers persist automatically: search -> share (a result
-   row grows into the page) and share -> devices (the page flies into the laptop screen).
+5. **Transitions:** the light hand-over (the light flies from one scene into the next in the
+   signature's shape and changes colour along its tail), `whip` (fast pan with motion blur),
+   `cut` (hard cut on a beat), `wipe` (a line of light sweeps across and reveals the next scene),
+   `push` (the camera flies through the outgoing scene into the next). Containers persist
+   automatically: search -> share (a row grows into the page), share -> devices (the page flies
+   into the laptop). Mix at least three kinds in a film; never the same one three times running.
 6. **Hook:** `"hook": "converge"` (lights sweep in from the edges into the facets) or `"trace"`
    (one light draws the logo's silhouette, then the fill slams in; best for single-shape marks).
 7. **Script:** write it like a copywriter, not a feature list.
@@ -142,21 +149,36 @@ Decide, in this order:
 | mobile apps | `phone` | the tap, then the notification outline |
 | physical products (car, device, bottle) | `product` | rim light on the silhouette, spec leaders |
 | works everywhere | `devices` | three lights chase a loop behind the devices |
+| the product's own essence (hero moment) | `signature` | the product's motif drawn across the frame |
 
-Write the beat sheet in your reply, e.g.:
+The order of scenes is a story, not a checklist: start where the viewer's problem is (cold open) or
+where the brand is (slam), build to the most impressive proof, and land the logo on the music's
+biggest moment. Two products should never share the same scene order.
+
+**Propose the film and ask before building.** Show the plan as a storyboard the user can read in
+ten seconds, then ask. Example:
 
 ```
-21.8 s | 16:9 | 60 fps | light stage | music: uplifting | voice: Ava
-0.00  hook: 5 lights converge (Figma's facets)           SLAM 0.60 on the downbeat
-1.12  lockup, light writes "Figma"
-3.00  share   (purple)  "Design together."      key "together" on the cursors
-8.60  flow    (blue)    "Prototype in minutes." key "minutes" when the last node lights
-11.0  chat    (green)   "Ask, and it's drafted." key "drafted"
-13.9  devices (orange)  "On every screen."       key "screen" on Synced
-16.3  race back -> LOGO HIT 17.40 on the drop -> "Figma." -> end card 19.8
+FIGMA · "launch" format · 21.8 s · 16:9 · light stage · signature: spark
+Music: hype (its own song) · SFX palette: punchy · Voice: Ava (female, warm)
+
+0.0   Trace hook: one light draws the Figma mark -> SLAM on the downbeat
+1.1   Light writes "Figma"
+3.0   share     Live cursors fly onto a design canvas   "Design together."
+8.6   flow      (whip) light runs Home > Cart > Checkout  "Prototype in minutes."
+11.0  chat      (wipe) a prompt becomes a pricing page    "Just ask."
+13.9  devices   (push) the page lands on laptop, tablet, phone  "On every screen."
+16.3  hard CUT to the logo on the drop -> "Figma." -> end card "made by ..."
 ```
 
-Then build it without waiting for approval. The user redirects after seeing it.
+Then ask, with the AskUserQuestion tool when it is available (otherwise a plain question), for
+example: "Render this?" with options "Yes, make it" / "Change the script" / "Different style or
+music" / "Other". Apply what the user says (new lines, scenes, order, voice, mood, length, colours)
+and show the updated storyboard again only if the change was big. Skip the question only when the
+user already said "just make it", "no questions" or similar, or gave you a complete brief.
+
+After the stills (Step 4) send the contact sheet image to the user too, before the long final
+render, so they can stop it early.
 
 ### Step 3: write `brief.json` (section 4), then voice
 
@@ -241,8 +263,26 @@ more axes from the most recent film unless the user asked for the same look:
 | scene mix | rebuilt UI, real screenshots, statements, features, product shots, custom scenes |
 
 The score is seeded from the product name, so even two films in the same mood get different
-chord progressions, keys, lead instruments and drum patterns. Set `music.seed` to re-roll a song
-the user does not like.
+chord progressions, keys, lead instruments, drum patterns and drum-kit tuning. The sound effects go
+through a per-product palette too (below). Set `music.seed` / `sfx.seed` to re-roll.
+
+**Signature: make the light belong to the product.** `"signature"` shapes every hand-over, the peel,
+a cold-open hook and the end-card line, and gives the `signature` scene its hero moment, with
+sounds on the motif's events:
+
+| signature | the light becomes | fits |
+|---|---|---|
+| `ecg` | a heartbeat trace that beeps like a monitor | health, care, fitness, medical, wellbeing |
+| `wave` | a sound wave | music, audio, voice, podcasts, calls |
+| `circuit` | PCB traces with 45-degree corners that tick | dev tools, AI, hardware, infra, security |
+| `route` | a winding road with pins | maps, travel, delivery, logistics, cars |
+| `ripple` | a decaying ripple | messaging, social, notifications |
+| `rise` | a climbing market line | finance, analytics, growth, sales |
+| `spark` | a zig-zag spark | creative tools, design, writing, education |
+| `none` | soft curves | anything where a motif would be a stretch |
+
+If none fits, invent the product's own motif in `custom_scenes.py` (a coffee app's steam curl, a
+fashion brand's stitch line) rather than forcing one.
 
 - Different products get different **scenes, order, stage, hook, transitions, mood and pacing**.
   A dev tool: dark, trace hook, `statement` -> `chat` -> `flow` (whip) -> `chart`, mood dark.
@@ -266,6 +306,8 @@ the user does not like.
   "duration": 21.8,              // seconds; the hit lands on a downbeat, end card is 2 s after the lockup
   "bpm": 100,                    // the picture grid; set it to the track's BPM when using a track
   "format": "journey",           // journey | keynote | launch | story | showcase | reel (fills the rest)
+  "signature": "none",           // ecg | wave | circuit | route | ripple | rise | spark | none
+  "sfx": {"palette": "clean"},   // clean | punchy | organic | soft | digital | cinematic | mechanical
   "ending": "race",              // race | reveal | cut | write
   "opening": "slam",             // "slam" (logo first) | "cold" (logo only at the end)
   "hook": "converge",            // "converge" | "trace"  (with "cold", lights converge into scene 1)
@@ -330,6 +372,9 @@ product `sheen s1 s2..`, phone `tap`, statement `written`. Offsets work: `"hit+0
 - `features`: `items` ([{title, desc, kind}] 3-6).
 - `phone`: `image` (app screenshot, optional), `title`, `rows`, `tap`, `notify` ({title, body}).
 - `product`: `image` (transparent PNG best), `specs` ([{value, at: [x, y] 0-1 on the image}]).
+- `signature`: `lines` (1-2 short lines above the trace), `highlight` (one word in the light colour),
+  `kind` (a motif other than the film's `signature`). Anchors: `key`, `e1 e2 ..` (each heartbeat,
+  node or pin).
 
 ---
 
@@ -350,6 +395,15 @@ product `sheen s1 s2..`, phone `tap`, statement `written`. Offsets work: `"hit+0
   "bass drop" -> hype; "calm", "cozy", "lofi" -> chill; "fashion", "club", "fintech" -> house;
   health, education, food, family, non-profit -> acoustic; dev tools, AI, B2B, security -> minimal.
   `music.seed` (any number) re-rolls the song; `music.transpose` fixes the key.
+- `sfx.palette` (defaults from the mood; every product also gets its own seeded variation of pitch,
+  colour and room):
+  - `clean`: bright, tight, polished UI sounds (consumer apps, SaaS).
+  - `punchy`: saturated hits, bright whooshes (launches, hype).
+  - `organic`: wooden clicks, marimba pops, warm room (health, food, education, wellness).
+  - `soft`: bubbly pops, rounded and quiet (calm, lifestyle, kids, notes).
+  - `digital`: bit-crushed zaps and ticks (dev tools, AI, crypto, gaming).
+  - `cinematic`: low booms, big rooms (cars, hardware, epic launches).
+  - `mechanical`: servo whines under the moves (hardware, robotics, automotive).
 - `music.file`: the user's own track (mp3/wav/m4a). `python "$ENGINE/run.py" music-info track.mp3`
   prints its BPM and drop time; set `bpm` to it. The engine offsets the track so its drop lands on
   the logo hit, thins it before the hit and fades it under the end card. Optional
