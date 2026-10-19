@@ -1,0 +1,86 @@
+{
+  "aspect": "16:9",
+  "duration": 21.8,
+  "bpm": 100,
+  "brand": {
+    "name": "Prism",
+    "wordmark": "Prism Drive",
+    "logo": "assets/logo.svg"
+  },
+  "font": {
+    "family": "Inter"
+  },
+  "acts": [
+    {
+      "scene": "upload"
+    },
+    {
+      "scene": "search"
+    },
+    {
+      "scene": "share"
+    },
+    {
+      "scene": "devices"
+    }
+  ],
+  "end_card": {
+    "style": "credit",
+    "top": "made by",
+    "name": "Your Name",
+    "small": "Fictional brand \u00b7 example project"
+  },
+  "vo": [
+    {
+      "text": "Every file.",
+      "key": "file",
+      "at": "act1.w1"
+    },
+    {
+      "text": "Every photo.",
+      "key": "photo",
+      "at": "act1.w2"
+    },
+    {
+      "text": "Every idea.",
+      "key": "idea",
+      "at": "act1.w3"
+    },
+    {
+      "text": "One place!",
+      "key": "One",
+      "at": "act1.drop",
+      "role": "drop"
+    },
+    {
+      "text": "Found in seconds.",
+      "key": "seconds",
+      "at": "act2.key"
+    },
+    {
+      "text": "Shared in one tap.",
+      "key": "tap",
+      "at": "act3.key"
+    },
+    {
+      "text": "Yours, on every device.",
+      "key": "device",
+      "at": "act4.key"
+    },
+    {
+      "text": "Prism Drive.",
+      "key": "Prism",
+      "at": "hit+0.3",
+      "role": "brand"
+    }
+  ],
+  "voice": {
+    "engine": "edge",
+    "voice": "en-US-AvaMultilingualNeural",
+    "rate": "+6%"
+  },
+  "music": {
+    "mood": "hype"
+  },
+  "output_name": "prism_example"
+}

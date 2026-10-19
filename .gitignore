@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.engine/
+.cache/
+build/
+out/
+*.part.mp4
+examples/*/assets/fonts/

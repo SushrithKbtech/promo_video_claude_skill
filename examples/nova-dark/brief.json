@@ -1,0 +1,177 @@
+{
+  "aspect": "16:9",
+  "duration": 30,
+  "bpm": 100,
+  "hook": "trace",
+  "stage": {
+    "mode": "dark",
+    "color": "#06070B",
+    "strength": 0.22
+  },
+  "brand": {
+    "name": "Nova",
+    "wordmark": "Nova",
+    "logo": "assets/logo.svg",
+    "wordmark_weight": 600
+  },
+  "font": {
+    "family": "Inter"
+  },
+  "acts": [
+    {
+      "scene": "statement",
+      "data": {
+        "lines": [
+          "Your team's work,",
+          "finally in sync."
+        ],
+        "highlight": "sync."
+      }
+    },
+    {
+      "scene": "features",
+      "transition": "whip",
+      "data": {
+        "items": [
+          {
+            "title": "Live docs",
+            "desc": "Write together, instantly",
+            "kind": "doc"
+          },
+          {
+            "title": "Tasks",
+            "desc": "Plan sprints in minutes",
+            "kind": "task"
+          },
+          {
+            "title": "Automations",
+            "desc": "No-code workflows",
+            "kind": "link"
+          },
+          {
+            "title": "Insights",
+            "desc": "Know what moved",
+            "kind": "sheet"
+          },
+          {
+            "title": "AI assistant",
+            "desc": "Ask anything",
+            "kind": "chat"
+          }
+        ]
+      }
+    },
+    {
+      "scene": "chat",
+      "data": {
+        "prompt": "What shipped this week?",
+        "answer": [
+          "Three launches went live:",
+          "Billing v2, Dark mode,",
+          "and the new Insights page."
+        ]
+      }
+    },
+    {
+      "scene": "flow",
+      "transition": "cut",
+      "data": {
+        "nodes": [
+          {
+            "label": "New lead",
+            "kind": "link"
+          },
+          {
+            "label": "Enrich",
+            "kind": "sheet"
+          },
+          {
+            "label": "Assign",
+            "kind": "task"
+          },
+          {
+            "label": "Notify",
+            "kind": "chat"
+          }
+        ],
+        "result": "Automated"
+      }
+    },
+    {
+      "scene": "phone",
+      "transition": "whip",
+      "data": {
+        "title": "Today",
+        "notify": {
+          "title": "Nova",
+          "body": "Sprint 14 is ready to ship"
+        }
+      }
+    },
+    {
+      "scene": "chart",
+      "data": {
+        "value": "+212%",
+        "label": "Team velocity since Nova"
+      }
+    }
+  ],
+  "end_card": {
+    "style": "cta",
+    "headline": "Work, in sync.",
+    "url": "nova.app",
+    "small": "Fictional brand \u00b7 example project"
+  },
+  "music": {
+    "mood": "dark"
+  },
+  "voice": {
+    "engine": "edge",
+    "voice": "en-US-AndrewMultilingualNeural",
+    "rate": "+2%"
+  },
+  "vo": [
+    {
+      "text": "Your team's work,",
+      "key": "work",
+      "at": "act1.written-0.5"
+    },
+    {
+      "text": "finally in sync.",
+      "key": "sync",
+      "at": "act1.key"
+    },
+    {
+      "text": "Everything, in one place.",
+      "key": "place",
+      "at": "act2.key"
+    },
+    {
+      "text": "Just ask.",
+      "key": "ask",
+      "at": "act3.send"
+    },
+    {
+      "text": "Automate the busywork.",
+      "key": "busywork",
+      "at": "act4.key"
+    },
+    {
+      "text": "Ship from anywhere.",
+      "key": "anywhere",
+      "at": "act5.key"
+    },
+    {
+      "text": "Twice as fast.",
+      "key": "fast",
+      "at": "act6.key"
+    },
+    {
+      "text": "Nova.",
+      "key": "Nova",
+      "at": "hit+0.3",
+      "role": "brand"
+    }
+  ],
+  "output_name": "nova_example"
+}
