@@ -68,6 +68,8 @@ class Scene:
         self.color = film.light_color(c) if isinstance(c, int) else c
         self.facet = spec.get("facet", idx)
         self.transition = spec.get("transition", "light")
+        # scenes entered by a camera move appear at once; after a light hand-over they wait for it
+        self.t_in = a + (0.0 if self.transition in ("push", "wipe", "whip", "cut") else 0.18)
         self.land = a if idx == 0 else a + (0.22 if self.transition in ("whip", "cut") else
                                             0.3 if self.transition in ("wipe", "push") else self.handover)
         self.prev = None
@@ -750,16 +752,18 @@ class Devices(Scene):
 
 
 def _mobile_page(sc, w, h, title):
+    from .ui import Theme
+    L = Theme()  # light product UI, whatever the stage
     p = ui.Painter(w, h, sc.ppd, sc.fonts)
     p.rrect(0, 0, w, h, 4, fill="#FFFFFF")
-    p.rrect(0, 0, w, 44, 0, fill=sc.T.paper_frame)
-    ui.draw_kind_icon(p, "doc", 12, 12, 20, sc.T)
-    p.rrect(40, 18, w * 0.4, 8, 4, fill=sc.T.track)
-    p.text(16, 82, title, max(14, w * 0.075), 500, sc.T.text)
+    p.rrect(0, 0, w, 44, 0, fill=L.paper_frame)
+    ui.draw_kind_icon(p, "doc", 12, 12, 20, L)
+    p.rrect(40, 18, w * 0.4, 8, 4, fill=L.track)
+    p.text(16, 82, title, max(14, w * 0.075), 500, L.text)
     r = rng(int(w))
     y = 104
     while y < h - 20:
-        p.rrect(16, y, (w - 32) * r.uniform(0.5, 0.95), 7, 3.5, fill=sc.T.bars)
+        p.rrect(16, y, (w - 32) * r.uniform(0.5, 0.95), 6, 3, fill="#E3E6EA")
         y += 20
     return p.sprite()
 
@@ -913,7 +917,7 @@ class Chart(Scene):
     def draw(self, cv, t):
         f, T, k = self.f, self.T, self.fit
         out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
-        a_in = ease_out(ramp(t, self.a + 0.18, self.a + 0.58))
+        a_in = ease_out(ramp(t, self.t_in, self.t_in + 0.4))
         al = a_in * out
         if al <= 0:
             return
@@ -1030,7 +1034,7 @@ class Chat(Scene):
     def draw(self, cv, t):
         f, T, k = self.f, self.T, self.fit
         out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
-        a_in = ease_out(ramp(t, self.a + 0.2, self.a + 0.6), 2.5)
+        a_in = ease_out(ramp(t, self.t_in, self.t_in + 0.4), 2.5)
         if a_in * out <= 0:
             return
         pill = self.sp("pill", lambda: ui.pill(1000, 92, self.ppd, self.fonts, T.field))
@@ -1575,7 +1579,7 @@ class Phone(Scene):
     def draw(self, cv, t):
         f, T, k = self.f, self.T, self.k
         out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
-        a_in = ease_out(ramp(t, self.a + 0.18, self.a + 0.58), 2.6)
+        a_in = ease_out(ramp(t, self.t_in, self.t_in + 0.4), 2.6)
         if out * a_in <= 0:
             return
         bob = self.bob(t, a_in)
@@ -1714,7 +1718,7 @@ class Product(Scene):
     def draw(self, cv, t):
         f, T = self.f, self.T
         out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
-        a_in = ease_out(ramp(t, self.a + 0.18, self.a + 0.58), 2.2)
+        a_in = ease_out(ramp(t, self.t_in, self.t_in + 0.4), 2.2)
         al = a_in * out
         if al <= 0:
             return
