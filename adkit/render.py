@@ -389,8 +389,23 @@ def cmd_audio(a):
 
 
 def cmd_music_info(a):
-    from .audio import analyze_track
-    print(json.dumps(analyze_track(a.file), indent=2))
+    from .beatmap import analyze
+    r = analyze(a.file)
+    print(json.dumps({"bpm": r["bpm"], "drop_at": r["drop_at"], "duration": r["duration"],
+                      "beats": len(r["beats"]), "first_downbeats": r["downbeats"][:6]}, indent=2))
+    # the song's map, bar by bar: where it builds, drops and breaks down (track seconds)
+    from .beatmap import bar_map
+    rows = bar_map(a.file, r)
+    print()
+    print(" bar  track_s   loud  low_end  section")
+    for row in rows:
+        if row["mark"] or row["bar"] % 8 == 0:
+            print(f" {row['bar']:3d}  {row['t']:7.2f}  {row['db']:5.1f}  {row['low_db']:7.1f}  {row['mark']}")
+    drops = [row["t"] for row in rows if row["mark"] == "DROP"]
+    if drops:
+        print()
+        print(f" drops at {drops} s. Put a drop on the product reveal and the last one on the logo:"
+              ' "music": {"file": ..., "drop_at": <a drop>, "hit_at": <film time of the logo hit>}')
 
 
 def cmd_doctor(a):
@@ -420,7 +435,27 @@ def cmd_doctor(a):
 
 def cmd_capture(a):
     from .capture import capture
-    print(json.dumps(capture(a.url, a.out), indent=2)[:4000])
+    res = capture(a.url, a.out)
+    if not a.no_scroll:
+        # scroll every page through so scroll-revealed sections are captured too (looks only, never clicks)
+        from urllib.parse import urljoin
+        from .scroll import scroll_capture
+        hold = tuple(float(v) for v in a.hold.split(":")) if a.hold else None
+        shots = {}
+        root = a.url.rstrip("/") + "/"
+        # page names are paths under the site root, leading slash optional ("about,pricing")
+        pages = [p.strip().strip("/") for p in (a.pages or "").split(",") if p.strip().strip("/")]
+        for i, path in enumerate([""] + pages):
+            name = "home" if not path else "".join(c if c.isalnum() else "_" for c in path)
+            try:
+                shots[name] = [os.path.relpath(p, a.out) for p in scroll_capture(
+                    urljoin(root, path), os.path.join(a.out, "assets", "screens", "scroll"), name,
+                    hold=hold if i == 0 else None)]
+            except Exception as e:
+                shots[name] = f"failed: {e}"
+        res["scroll_shots"] = shots
+        json.dump(res, open(os.path.join(a.out, "capture.json"), "w", encoding="utf-8"), indent=2)
+    print(json.dumps(res, indent=2)[:4000])
 
 
 def main(argv=None):
@@ -464,6 +499,9 @@ def main(argv=None):
     p = sub.add_parser("capture")
     p.add_argument("url")
     p.add_argument("out")
+    p.add_argument("--pages", help="more paths to scroll through, comma separated: /about,/pricing")
+    p.add_argument("--hold", help="time-lapse at one scroll position of the home page, Y:N:EVERY (px:shots:s)")
+    p.add_argument("--no-scroll", action="store_true", help="skip the scroll-through shots")
     a = ap.parse_args(argv)
     if a.cmd == "stills":
         cmd_stills(a)

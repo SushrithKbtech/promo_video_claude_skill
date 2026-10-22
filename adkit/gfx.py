@@ -128,11 +128,73 @@ class Canvas:
         self.zoom = 1.0        # scale about the frame centre (push transitions)
         self.fade = 1.0        # opacity multiplier for everything drawn
         self.region = None     # (x0, x1) design px: only this vertical band is visible (wipes)
+        self.mask = None       # full-frame float mask (H, W): only where it is 1 is visible (shape wipes)
+
+    def draw_full(self, rgb, alpha=1.0):
+        """Composite a full-frame linear-RGB image (e.g. a rendered 3D set) as an opaque layer.
+        Honours the canvas camera (offset, zoom), fade and wipe region like any sprite."""
+        a = alpha * self.fade
+        if a <= 0.002:
+            return
+        A = np.full((self.H, self.W, 1), a, np.float32)
+        img = rgb
+        if abs(self.zoom - 1) > 1e-4 or self.off != (0.0, 0.0):
+            M = cv2.getRotationMatrix2D((self.W / 2, self.H / 2), 0, self.zoom)
+            M[:, 2] += (self.off[0] * self.S * self.zoom, self.off[1] * self.S * self.zoom)
+            img = cv2.warpAffine(rgb, M, (self.W, self.H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT)
+            A = cv2.warpAffine(A[..., 0], M, (self.W, self.H), flags=cv2.INTER_LINEAR,
+                               borderMode=cv2.BORDER_CONSTANT)[..., None]
+        rm = self._mask_roi(0, 0, self.W, self.H)
+        if rm is not None:
+            A = A * rm
+        dst = self._target()
+        dst[..., :3] = dst[..., :3] * (1 - A) + img * A
+        dst[..., 3:4] = dst[..., 3:4] * (1 - A) + A
+        self._grow((0, 0, self.W, self.H))
 
     def _tp(self, x, y):
         """Design point after the canvas camera (offset, then zoom about the centre)."""
         cx, cy = self.W / self.S / 2, self.H / self.S / 2
         return cx + (x + self.off[0] - cx) * self.zoom, cy + (y + self.off[1] - cy) * self.zoom
+
+    def _mask_roi(self, x0, y0, x1, y1):
+        """Combined wipe-region and shape mask for a pixel ROI, shaped (h, w, 1), or None."""
+        m = None
+        rm = self._region_mask(x0, x1)
+        if rm is not None:
+            m = np.repeat(rm[None, :], y1 - y0, 0)
+        if self.mask is not None:
+            sm = self.mask[y0:y1, x0:x1]
+            m = sm if m is None else m * sm
+        return None if m is None else m[..., None]
+
+    def fill_poly(self, pts, color, alpha=1.0, blur=0.0):
+        """Anti-aliased filled polygon (design px) into the UI layer, premultiplied."""
+        if alpha * self.fade <= 0.002:
+            return
+        pts = np.array([self._tp(x, y) for x, y in np.asarray(pts, np.float64)]) * self.S
+        pad = int(blur * self.S * 3) + 2
+        x0 = max(0, int(np.floor(pts[:, 0].min())) - pad)
+        y0 = max(0, int(np.floor(pts[:, 1].min())) - pad)
+        x1 = min(self.W, int(np.ceil(pts[:, 0].max())) + pad + 1)
+        y1 = min(self.H, int(np.ceil(pts[:, 1].max())) + pad + 1)
+        if x1 <= x0 or y1 <= y0:
+            return
+        m = np.zeros((y1 - y0, x1 - x0), np.uint8)
+        cv2.fillPoly(m, [np.round((pts - (x0, y0)) * 16).astype(np.int32)], 255, cv2.LINE_AA, 4)
+        a = m.astype(np.float32) / 255.0
+        if blur > 0.05:
+            a = cv2.GaussianBlur(a, (0, 0), blur * self.S)
+        a = a[..., None] * (alpha * self.fade)
+        mm = self._mask_roi(x0, y0, x1, y1)
+        if mm is not None:
+            a = a * mm
+        col = lin(color) if isinstance(color, str) else np.asarray(color, np.float32)
+        dst = self._target()[y0:y1, x0:x1]
+        dst *= (1 - a)
+        dst[..., :3] += col * a
+        dst[..., 3:4] += a
+        self._grow((x0, y0, x1, y1))
 
     def _region_mask(self, x0, x1):
         if self.region is None:
@@ -253,9 +315,9 @@ class Canvas:
                 L2 = dx * dx + dy * dy + 1e-6
                 m *= np.clip(1 - ((xs_ - gx0) * dx + (ys_ - gy0) * dy) / L2, 0, 1)
             src *= m[..., None]
-        rm = self._region_mask(x0, x1)
+        rm = self._mask_roi(x0, y0, x1, y1)
         if rm is not None:
-            src *= rm[None, :, None]
+            src *= rm
         if dim > 0:
             # pull colour toward the stage while keeping coverage
             src[..., :3] = src[..., :3] * (1 - dim) + src[..., 3:4] * self._stage_lin * dim
@@ -303,9 +365,9 @@ class Canvas:
         H = cv2.getPerspectiveTransform(srcq, np.float32(quad - (x0, y0)))
         src = cv2.warpPerspective(img, H, (x1 - x0, y1 - y0), flags=cv2.INTER_LINEAR,
                                   borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0))
-        rm = self._region_mask(x0, x1)
+        rm = self._mask_roi(x0, y0, x1, y1)
         if rm is not None:
-            src *= rm[None, :, None]
+            src *= rm
         if alpha < 1:
             src *= alpha
         dst = self._target()[y0:y1, x0:x1]
@@ -355,9 +417,9 @@ class Canvas:
             cv2.line(roi, (int(q[i, 0]), int(q[i, 1])), (int(q[i + 1, 0]), int(q[i + 1, 1])),
                      (float(v[0]), float(v[1]), float(v[2])), th, cv2.LINE_AA, 4)
         f = roi.astype(np.float32) * (LMAX / 255.0)
-        rm = self._region_mask(x0, x1)
+        rm = self._mask_roi(x0, y0, x1, y1)
         if rm is not None:
-            f *= rm[None, :, None]
+            f *= rm
         if occlude > 0:
             f *= (1 - occlude * self.ui[y0:y1, x0:x1, 3:4])
         (self.over if layer == "over" else self.under)[y0:y1, x0:x1] += f
@@ -377,9 +439,9 @@ class Canvas:
         cv2.circle(roi, (int(round((x - x0) * 16)), int(round((y - y0) * 16))), int(round(r * 16)),
                    tuple(float(c) for c in v), -1, cv2.LINE_AA, 4)
         f = roi.astype(np.float32) * (LMAX / 255.0)
-        rm = self._region_mask(x0, x1)
+        rm = self._mask_roi(x0, y0, x1, y1)
         if rm is not None:
-            f *= rm[None, :, None]
+            f *= rm
         (self.over if layer == "over" else self.under)[y0:y1, x0:x1] += f
         self._touch("over" if layer == "over" else "under", x0, y0, x1, y1)
 
@@ -507,7 +569,7 @@ class Canvas:
 # ---------------------------------------------------------------------------
 
 def stage_background(cv: Canvas, t, base="#FAFAFB", tint="#3186FF", strength=0.16, pulse=0.0,
-                     seed=7, dark=False):
+                     seed=7, dark=False, backdrop="blobs"):
     """Soft pastel blobs that drift and breathe: 62 % white + 38 % tint."""
     w, h = max(16, cv.W // 8), max(16, cv.H // 8)
     yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
@@ -534,7 +596,51 @@ def stage_background(cv: Canvas, t, base="#FAFAFB", tint="#3186FF", strength=0.1
     else:
         blob = srgb_to_linear(0.62 * np.ones(3, np.float32) + 0.38 * hex_srgb(tint))
         small = base_l[None, None] * (1 - k * field[..., None]) + blob[None, None] * (k * field[..., None])
+    small = _backdrop(small.astype(np.float32), backdrop, t, tint, dark, xx, yy, aspect)
     cv.bg = cv2.resize(small.astype(np.float32), (cv.W, cv.H), interpolation=cv2.INTER_CUBIC)
+
+
+def _backdrop(img, kind, t, tint, dark, xx, yy, aspect):
+    """Extra stage layers: a planet-rim horizon, concentric rings, glassy ripples or a floor grid."""
+    if kind in (None, "blobs"):
+        return img
+    c = lin(tint)
+    if kind == "horizon":
+        # a huge planet whose rim glows along the bottom of the frame
+        cx, cy, R = aspect / 2, 1.0 + 1.55, 1.75 + 0.01 * math.sin(t * 0.4)
+        d = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2) - R
+        # the stage is computed small and upscaled, so the rim stays wide enough to never alias
+        rim = np.exp(-(d / 0.06) ** 2) + 0.35 * np.exp(-(np.maximum(d, 0) / 0.2) ** 2)
+        inside = np.clip(-d / 0.05, 0, 1)
+        if dark:
+            img = img + c[None, None] * rim[..., None] * 0.5
+            img = img * (1 - 0.45 * inside[..., None]) + c * 0.03 * inside[..., None]
+        else:
+            img = img * (1 - 0.25 * rim[..., None]) + c[None, None] * 0.25 * rim[..., None]
+        return img
+    if kind == "rings":
+        cx, cy = aspect * 0.5, 0.5
+        r = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+        # a round table seen from above: a few hairline rings, a faint pool of light at the centre
+        rings = sum(w * np.exp(-((r - R) / 0.009) ** 2) for R, w in
+                    ((0.34 + 0.015 * math.sin(t * 0.5), 1.0), (0.62, 0.6), (0.98, 0.35)))
+        glow = np.exp(-(r / 0.5) ** 2)
+        k = (0.035 * rings + 0.035 * glow)[..., None]
+        return img + c * k if dark else img * (1 - k) + c[None, None] * k
+    if kind == "ripple":
+        cx, cy = aspect * 0.5, 0.5
+        r = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+        wave = 0.5 + 0.5 * np.cos((r - t * 0.12) * 2 * math.pi / 0.11)
+        k = (0.07 * wave * np.exp(-(r / 0.6) ** 2))[..., None]
+        shade = np.array([0.0, 0.0, 0.0], np.float32) if not dark else c * 0.5
+        return img * (1 - k) + shade * k if not dark else img + shade * k
+    if kind == "grid":
+        gx = np.abs(((xx - aspect / 2) / np.maximum(yy - 0.35, 0.02) * 0.25) % 0.1 - 0.05)
+        gy = np.abs((1 / np.maximum(yy - 0.35, 0.02) + t * 0.6) % 1.0 - 0.5)
+        lines = (np.exp(-(gx / 0.004) ** 2) + np.exp(-(gy / 0.03) ** 2)) * (yy > 0.4) * np.clip((yy - 0.4) * 2, 0, 1)
+        k = (0.12 * lines)[..., None]
+        return img + c * k if dark else img * (1 - k) + c * k
+    return img
 
 
 class ParticleField:
@@ -581,16 +687,25 @@ class ParticleField:
 
 
 def post(cv: Canvas, img, t, frame_index, breath=0.008, shake=(0.0, 0.0), vignette=0.07,
-         grain=0.005, grain_tiles=None):
-    """Camera (breath + shake + push), vignette, gamma, grain -> uint8 RGB."""
+         grain=0.005, grain_tiles=None, zoom_mul=1.0, flash=0.0, flash_color=None, split=0.0):
+    """Camera (breath + shake + push + beat punch), flash, RGB split, vignette, gamma, grain -> uint8 RGB."""
     cam = cv.camera
-    z = cam["zoom"] * (1 + breath * math.sin(t * 2 * math.pi / 7.0))
+    z = cam["zoom"] * zoom_mul * (1 + breath * math.sin(t * 2 * math.pi / 7.0))
     dx = (shake[0] + cam["x"]) * cv.S
     dy = (shake[1] + cam["y"]) * cv.S
     if abs(z - 1) > 1e-5 or abs(dx) > 0.01 or abs(dy) > 0.01 or cam["rot"]:
         M = cv2.getRotationMatrix2D((cv.W / 2, cv.H / 2), cam["rot"], z)
         M[:, 2] += (dx, dy)
         img = cv2.warpAffine(img, M, (cv.W, cv.H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
+    if flash > 0.003:   # a drop's exposure kick, in the light's colour (linear light, so it blooms naturally)
+        col = np.asarray(flash_color if flash_color is not None else (1.0, 1.0, 1.0), np.float32)
+        img = img * (1 + 0.6 * flash) + col * (0.22 * flash)
+    if split > 0.05:    # chromatic split on impacts: red one way, blue the other
+        px = split * cv.S
+        for ch, sx in ((0, px), (2, -px)):
+            M = np.float32([[1, 0, sx], [0, 1, 0]])
+            img[..., ch] = cv2.warpAffine(np.ascontiguousarray(img[..., ch]), M, (cv.W, cv.H),
+                                          flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
     if vignette > 0:
         img *= _vignette(cv.W, cv.H, vignette)
     out = linear_to_srgb(img)

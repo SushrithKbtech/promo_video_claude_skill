@@ -75,10 +75,13 @@ def analyze_track(path):
 def track_bed(film, spec):
     path = spec["file"] if os.path.isabs(spec["file"]) else os.path.join(film.dir, spec["file"])
     x = decode(path)
-    drop_at = spec.get("drop_at")
-    if drop_at is None:
-        drop_at = analyze_track(path)["drop_at"]
-    offset = film.hit - float(drop_at)
+    if getattr(film, "track", None):
+        offset = film.track_offset          # the film's grid was built from this track's beats
+    else:
+        drop_at = spec.get("drop_at")
+        if drop_at is None:
+            drop_at = analyze_track(path)["drop_at"]
+        offset = film.hit - float(drop_at)
     n = N(film.duration + 0.5)
     out = np.zeros((n, 2))
     i0 = int(round(offset * SR))

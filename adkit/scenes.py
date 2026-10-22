@@ -23,7 +23,7 @@ import numpy as np
 from PIL import Image
 
 from . import ui
-from .core import (Path, clamp, chaikin, damped, ease_in, ease_in_out, ease_out, lerp, lin, mix_hex,
+from .core import (Path, hex_srgb, clamp, chaikin, damped, ease_in, ease_in_out, ease_out, lerp, lin, mix_hex,
                    pulse, ramp, resample, rng, smooth, smoother, spring_in, window)
 
 SCENES = {}
@@ -69,9 +69,9 @@ class Scene:
         self.facet = spec.get("facet", idx)
         self.transition = spec.get("transition", "light")
         # scenes entered by a camera move appear at once; after a light hand-over they wait for it
-        self.t_in = a + (0.0 if self.transition in ("push", "wipe", "whip", "cut") else 0.18)
+        self.t_in = a + (0.0 if self.transition in ("push", "wipe", "whip", "cut", "shape") else 0.18)
         self.land = a if idx == 0 else a + (0.22 if self.transition in ("whip", "cut") else
-                                            0.3 if self.transition in ("wipe", "push") else self.handover)
+                                            0.3 if self.transition in ("wipe", "push", "shape") else self.handover)
         self.prev = None
         self.next = None
         self.fit = 1.0
@@ -994,7 +994,7 @@ class Chat(Scene):
 
     def setup(self):
         f, d = self.f, self.data
-        self.fit = k = min(1.0, (f.DW - 80) / 1000)
+        self.fit = k = min(1.0, (f.DW - 80) / 1000) * float(d.get("scale", 1.0))
         self.prompt = d.get("prompt", "Summarise this week's feedback")
         self.answer = d.get("answer") or ["Three themes stand out:", "faster onboarding,", "clearer pricing,",
                                           "and offline mode."]
@@ -1897,8 +1897,357 @@ class Signature(Scene):
 
 
 # ===========================================================================
+# diorama (the UI as a physical set, a 3D camera, an optional mascot)
+# ===========================================================================
+
+@register("diorama")
+class DioramaScene(Scene):
+    """The product's interface laid on a table like a physical object and filmed with a real 3D
+    camera: grazing angles, macro depth of field, warm practical light, a contact shadow. An
+    optional cube mascot hops across the UI (squash and stretch, shadow, landing debris) with a
+    glowing playhead under it; lanes of light can grow behind it; a title can glow on the UI.
+
+    data: {"image": "assets/screens/app.png", "crop": [x0, y0, x1, y1],   (or omit for a generated editor)
+           "camera": "swoop" | "flyover" | "orbit" | "reveal" | "follow",
+           "mascot": {"color": "#FF7A45", "size": 0.95} | false,
+           "path": [[u, v], ...]  (0-1 on the image; the hops),
+           "lanes": [{"v": 0.82, "u0": 0.1, "u1": 0.95, "color": "#FF5A5A"}, ...],
+           "playhead": true, "title": {"text": "MADE WITH ACME", "rect": [u0, v0, u1, v1]},
+           "table": "#3A2216", "dof": 1.0}
+    """
+    weight = 2.0
+
+    def setup(self):
+        from .diorama import Diorama, SLAB_T
+        f, d = self.f, self.data
+        tex = self._texture()
+        self.dio = Diorama(tex, f.W, f.H, table=d.get("table", "#3A2216"), key_light=d.get("key_light", "#FFB37A"),
+                           seed=self.i + 3)
+        lum = float(np.asarray(tex)[..., :3].mean()) / 255
+        self.light_ui = lum > 0.5
+        self.preset = d.get("camera", "swoop")
+        m = d.get("mascot", {"color": f.primary})
+        self.mascot = None if m is False or m is None else {"color": m.get("color", f.primary), "size": float(m.get("size", 0.95))}
+        self.path = [tuple(p) for p in (d.get("path") or [[0.1, 0.84], [0.3, 0.8], [0.5, 0.84], [0.7, 0.8], [0.9, 0.84]])]
+        self.lanes = d.get("lanes") if d.get("lanes") is not None else (self._default_lanes if self.generated else [])
+        self.playhead = bool(d.get("playhead", True))
+        self.dof = float(d.get("dof", 1.0))
+        n = max(1, len(self.path) - 1)
+        self.t_go = self.land + 0.35
+        self.key = max(self.a + 0.82 * self.L, self.t_go + 0.55 * n)
+        self.hop = (self.key - self.t_go) / n
+        self.t_land = [self.t_go + (i + 1) * self.hop for i in range(n)]
+        self.SLAB_T = SLAB_T
+
+    # -- the UI texture -----------------------------------------------------
+    def _texture(self):
+        f, d = self.f, self.data
+        self.generated = not d.get("image")
+        if not self.generated:
+            path = d["image"] if os.path.isabs(d["image"]) else os.path.join(f.dir, d["image"])
+            im = Image.open(path).convert("RGBA")
+            if d.get("crop"):
+                im = im.crop(tuple(d["crop"]))
+        else:
+            im = _editor_texture(self)
+        if im.width < 1800:
+            k = 1800 / im.width
+            im = im.resize((1800, int(im.height * k)), Image.LANCZOS)
+        t = d.get("title")
+        if t:
+            im = _title_on_texture(self, im, t)
+        return np.asarray(im)
+
+    # -- where things are ------------------------------------------------------
+    def mascot_at(self, t):
+        """World position of the mascot, squash amount, and the index of the current hop."""
+        pts = [self.dio.world(p) for p in self.path]
+        if t <= self.t_go:
+            return pts[0], 0.0, -1
+        for i in range(len(pts) - 1):
+            t0 = self.t_go + i * self.hop
+            t1 = t0 + self.hop
+            if t <= t1:
+                k = ramp(t, t0, t1)
+                air = ramp(t, t0 + 0.12 * self.hop, t1)            # crouch, then jump
+                pos = pts[i] + (pts[i + 1] - pts[i]) * ease_in_out(air, 1.4)
+                pos = pos.copy()
+                pos[2] = self.SLAB_T + 1.25 * 4 * air * (1 - air)
+                sq = 0.6 * (1 - ramp(k, 0, 0.12)) * (k > 0) * (i > 0) if k < 0.12 else -0.18 * math.sin(math.pi * air)
+                return pos, sq, i
+        k = ramp(t, self.t_land[-1], self.t_land[-1] + 0.25)
+        return pts[-1], 0.6 * (1 - k), len(pts) - 1
+
+    def camera(self, t):
+        from .diorama import Camera, camera_path
+        u = ramp(t, self.a - 0.1, self.b + 0.2)
+        pos, _, _ = self.mascot_at(t) if self.mascot else (self.dio.world((0.5, 0.5)), 0, 0)
+        eye, tgt, fov = camera_path(self.preset, u, pos, self.dio.slab_h)
+        return Camera(eye, tgt, fov, self.f.W, self.f.H)
+
+    def screen_point(self, t, world):
+        cam = self.camera(t)
+        p, z = cam.project([world])
+        return (p[0][0] / self.f.S, p[0][1] / self.f.S)
+
+    def entry(self):
+        return self.screen_point(self.land, self.dio.world(self.path[0]))
+
+    def exit(self):
+        return self.screen_point(self.b, self.dio.world(self.path[-1]))
+
+    def anchors(self):
+        a = {"key": self.key, "go": self.t_go}
+        for i, tl in enumerate(self.t_land):
+            a[f"l{i + 1}"] = tl
+        return a
+
+    def cues(self):
+        c = [dict(t=self.a, kind="swoosh", gain=-15, dur=1.0), dict(t=self.a + 0.6, kind="air", gain=-22, dur=1.2)]
+        if self.mascot:
+            for i, tl in enumerate(self.t_land):
+                c.append(dict(t=tl - self.hop * 0.88, kind="whoosh_short", gain=-25))
+                c.append(dict(t=tl, kind="pop_low", gain=-15))
+                c.append(dict(t=tl + 0.01, kind="tick", gain=-20, pitch=0.9 + 0.08 * i))
+            c.append(dict(t=self.key + 0.05, kind="success", gain=-17))
+        if self.data.get("title"):
+            c.append(dict(t=self.a + 0.4, kind="shimmer", gain=-20))
+        return c
+
+    # -- frame ----------------------------------------------------------------
+    def draw(self, cv, t):
+        from .diorama import draw_cube_mascot, draw_debris, draw_shadow
+        from .gfx import Canvas
+        f = self.f
+        out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
+        a_in = smooth(ramp(t, self.t_in - 0.02, self.t_in + 0.35))
+        if out * a_in <= 0:
+            return
+        cam = self.camera(t)
+        mpos, sq, hop_i = self.mascot_at(t) if self.mascot else (self.dio.world((0.5, 0.5)), 0, -1)
+        _, zf = cam.project([mpos])
+        sheen = lerp(-0.3, 1.4, ramp(t, self.a, self.b))
+        img = self.dio.render(cam, focus_depth=float(zf[0]), dof=self.dof, sheen=sheen)
+        # lights lying on the UI: lanes grow behind the mascot, the playhead follows it
+        lc = Canvas(f.W, f.H, f.S, "light" if self.light_ui else "dark", f.slate)
+        prog_u = (self.dio.world(self.path[0])[0], mpos[0])
+        for ln in self.lanes:
+            u0, u1 = ln.get("u0", 0.05), ln.get("u1", 0.95)
+            x0 = self.dio.world((u0, ln["v"]))[0]
+            x1 = min(self.dio.world((u1, ln["v"]))[0], max(prog_u[1], x0 + 0.01)) if self.mascot else \
+                lerp(x0, self.dio.world((u1, ln["v"]))[0], ramp(t, self.land, self.key))
+            if x1 <= x0 + 0.01:
+                continue
+            y = self.dio.world((0.5, ln["v"]))[1]
+            P = np.array([[x, y, self.SLAB_T + 0.005] for x in np.linspace(x0, x1, 60)])
+            p, z = cam.project(P)
+            ok = z > 0.1
+            if ok.sum() >= 2:
+                wpx = np.clip(9.0 * cam.fl / np.maximum(z[ok], 0.1) / 140, 1.5, 14)
+                lc.light_poly(p[ok] / f.S, lin(ln.get("color", self.color)), 0.85 * out, width=float(np.median(wpx)))
+        if self.mascot and self.playhead:
+            foot = mpos.copy()
+            foot[2] = self.SLAB_T + 0.005
+            bottom = foot.copy()
+            bottom[1] = -self.dio.slab_h / 2
+            P = np.array([foot + (bottom - foot) * k for k in np.linspace(0, 1, 30)])
+            p, z = cam.project(P)
+            if (z > 0.1).all():
+                lc.light_poly(p / f.S, lin(self.color), np.linspace(1.0, 0.25, 30) * out, width=4.0)
+                lc.light_dot(p[0] / f.S, lin(self.color), energy=1.6 * out, radius=7)
+        if lc.box["over"]:
+            lc._ink(img, lc.over, lc.box["over"], bloom=True)
+        # the mascot, its shadow and the debris of each landing
+        if self.mascot:
+            hgt = mpos[2] - self.SLAB_T
+            img = draw_shadow(img, cam, (mpos[0], mpos[1]), self.mascot["size"] * 0.62,
+                              0.55 * max(0.15, 1 - hgt / 1.6))
+            yaw = 0.0
+            if 0 <= hop_i < len(self.path) - 1:
+                a_, b_ = self.dio.world(self.path[hop_i]), self.dio.world(self.path[hop_i + 1])
+                yaw = 0.35 * math.atan2(b_[1] - a_[1], b_[0] - a_[0])
+            blink = (t * 1.7) % 3.1 < 0.12
+            img = draw_cube_mascot(img, cam, mpos, self.mascot["size"], yaw, self.mascot["color"], squash=sq, blink=blink)
+            for i, tl in enumerate(self.t_land):
+                if 0 <= t - tl < 0.9:
+                    img = draw_debris(img, cam, self.dio.world(self.path[i + 1]), t - tl, seed=self.i * 31 + i)
+        cv.draw_full(img, alpha=a_in * out)
+
+
+def _editor_texture(sc):
+    """A generic dark editor (panels, a viewer, a timeline) when no screenshot is given."""
+    W, H = 1800, 1100
+    p = ui.Painter(W, H, 1.0, sc.fonts)
+    p.k = 1.0
+    p.im = Image.new("RGBA", (W, H), (20, 21, 26, 255))
+    from PIL import ImageDraw
+    p.d = ImageDraw.Draw(p.im)
+    p.rrect(0, 0, W, 54, 0, fill="#15161B")
+    for i, lab in enumerate(("File", "Edit", "Composition", "Layer", "Effect", "Animation", "View")):
+        p.text(30 + i * 150, 36, lab, 22, 500, "#8A8F99")
+    p.rrect(20, 74, 360, 600, 10, fill="#1B1D23")
+    for i in range(12):
+        p.rrect(40, 100 + i * 44, 220 - (i % 3) * 40, 14, 7, fill="#2C3038")
+    p.rrect(400, 74, 980, 600, 10, fill="#0E0F12")
+    p.rrect(1400, 74, 380, 600, 10, fill="#1B1D23")
+    for i in range(9):
+        p.rrect(1420, 104 + i * 58, 300, 16, 8, fill="#2C3038")
+    p.rrect(20, 694, W - 40, 390, 10, fill="#16171C")
+    for i in range(6):
+        p.rrect(40, 740 + i * 52, 260, 14, 7, fill="#2C3038")
+    for x in range(330, W - 40, 60):
+        p.rrect(x, 712, 2, 12, 0, fill="#3A3F48")
+    sc._default_lanes = [dict(v=0.722, u0=0.19, u1=0.97, color="#FF5A5A"), dict(v=0.77, u0=0.19, u1=0.93, color="#FFD447"),
+                         dict(v=0.817, u0=0.19, u1=0.9, color="#7FE3D6"), dict(v=0.865, u0=0.19, u1=0.86, color="#B79CFF")]
+    return p.im
+
+
+def _title_on_texture(sc, im, t):
+    """Render a glowing title into a rect of the UI texture (like a title on the app's preview)."""
+    from PIL import ImageDraw, ImageFilter
+    W, H = im.size
+    u0, v0, u1, v1 = t.get("rect", [0.25, 0.12, 0.75, 0.5])
+    box = (int(u0 * W), int(v0 * H), int(u1 * W), int(v1 * H))
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    col = t.get("color", sc.color)
+    path = sc.f.fonts[700]
+    from .brand import _font
+    size = int(bh * 0.28)
+    fnt = _font(path, size)
+    while fnt.getlength(t["text"]) > bw * 0.9 and size > 10:
+        size -= 2
+        fnt = _font(path, size)
+    layer = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    dr = ImageDraw.Draw(layer)
+    cx, cy = (box[0] + box[2]) // 2, (box[1] + box[3]) // 2
+    rgb = tuple(int(c * 255) for c in hex_srgb(col))
+    dr.text((cx, cy), t["text"], font=fnt, fill=rgb + (255,), anchor="mm")
+    glow = layer.filter(ImageFilter.GaussianBlur(size * 0.35))
+    out = im.convert("RGBA")
+    if t.get("panel", True):
+        pan = Image.new("RGBA", im.size, (0, 0, 0, 0))
+        ImageDraw.Draw(pan).rounded_rectangle(box, radius=int(bh * 0.06), fill=(10, 10, 12, 235))
+        out = Image.alpha_composite(out, pan)
+    out = Image.alpha_composite(out, glow)
+    out = Image.alpha_composite(out, glow)
+    white = Image.new("RGBA", im.size, (0, 0, 0, 0))
+    ImageDraw.Draw(white).text((cx, cy), t["text"], font=fnt, fill=(255, 244, 232, 255), anchor="mm")
+    return Image.alpha_composite(out, white)
+
+
+# ===========================================================================
+# card (editorial social cards: headline, quote, stat)
+# ===========================================================================
+
+@register("card")
+class Card(Scene):
+    """Bold editorial cards, like a premium social carousel.
+
+    data: {"layout": "headline", "lines": ["WE RAN THE SAME PDF.", "IT WORKS."], "highlight": ["IT WORKS."]}
+          {"layout": "quote", "lines": ["The interface, the scene", "and the sound were all", "written by Claude."],
+           "highlight": ["written by Claude."], "by": "From the creator's PDF"}
+          {"layout": "stat", "value": "390", "lines": ["Words of prompt. Then 3", "follow-ups."], "highlight": ["3", "follow-ups."]}
+    """
+    weight = 1.1
+
+    def setup(self):
+        f, d = self.f, self.data
+        self.layout = d.get("layout", "headline")
+        self.lines = d.get("lines") or [f.brief.get("tagline", f.name).upper()]
+        self.hl = [h.lower() for h in (d.get("highlight") or [])]
+        self.disp = f.display_type()
+        self.margin = 150.0 if not f.portrait else 80.0
+        self.t0 = self.t_in + 0.05
+        self.key = max(self.a + 0.6 * self.L, self.t0 + 0.12 * len(self.lines) + 0.5)
+
+    def _is_hl(self, word):
+        w = word.lower()
+        return any(w in h.split() or w == h for h in self.hl) or any(h in w for h in self.hl if len(h) > 2 and " " not in h)
+
+    def entry(self):
+        return (self.margin, self.f.CY)
+
+    def exit(self):
+        return (self.f.DW - self.margin, self.f.CY + 120)
+
+    def anchors(self):
+        return {"key": self.key}
+
+    def cues(self):
+        c = [dict(t=self.t0 + 0.12 * i, kind="whoosh_short", gain=-24, pan=-0.3 + 0.2 * i) for i in range(len(self.lines))]
+        if self.layout == "stat":
+            c += [dict(t=self.t0, kind="riser_short", gain=-22, dur=0.8), dict(t=self.t0 + 0.8, kind="pop_low", gain=-14)]
+        c.append(dict(t=self.key, kind="tick", gain=-20))
+        return c
+
+    def _words(self, cv, line, x, y, size, typ, weight, t0, t, out, clip_h):
+        """Draw one line word by word (highlight words in the light colour), sliding up in a mask."""
+        k = ease_out(ramp(t, t0, t0 + 0.45), 3.0)
+        dy = (1 - k) * size * 1.05
+        clip = (0, y - size * 1.05, self.f.DW, y + size * 0.3)
+        for w in line.split(" "):
+            col = self.color if self._is_hl(w) else self.f.text_color
+            sp = typ.text(w, size, weight, col)
+            cv.draw(sp, x, y + dy, alpha=out, anchor=(0, sp.baseline / sp.h), clip=clip)
+            x += typ.width(w + " ", size, weight)
+        return x
+
+    def draw(self, cv, t):
+        f = self.f
+        out = 1 - smooth(ramp(t, self.b - 0.15, self.b + 0.2))
+        if out <= 0 or t < self.t_in - 0.05:
+            return
+        x0 = self.margin
+        if self.layout == "headline":
+            size = 150.0 if not f.portrait else 110.0
+            wmax = max(self.disp.width(l, size, 700) for l in self.lines)
+            if wmax > f.DW - 2 * x0:
+                size *= (f.DW - 2 * x0) / wmax
+            lh = size * 1.02
+            y0 = f.CY - lh * (len(self.lines) - 1) / 2 + size * 0.35
+            for i, line in enumerate(self.lines):
+                self._words(cv, line, x0, y0 + i * lh, size, self.disp, 700, self.t0 + 0.12 * i, t, out, size)
+            # a light underline sweeps under the last line
+            yl = y0 + (len(self.lines) - 1) * lh + size * 0.22
+            wl = self.disp.width(self.lines[-1], size, 700)
+            u = ease_in_out(ramp(t, self.t0 + 0.3, self.key), 2.0)
+            cv.light_path(Path([(x0, yl), (x0 + wl, yl)]), u, tail=0.7, color=self.color, width=6, energy=1.1 * out)
+        elif self.layout == "quote":
+            qs = self.disp.text("“", 260, 700, self.color)
+            qa = ease_out(ramp(t, self.t0 - 0.1, self.t0 + 0.3), 2.5)
+            top = f.CY - 60 * len(self.lines) / 2 - 140
+            cv.draw(qs, x0 - 10, top + 150 + 30 * (1 - qa), alpha=qa * out, anchor=(0, qs.baseline / qs.h))
+            size = 80.0 if not f.portrait else 60.0
+            for i, line in enumerate(self.lines):
+                self._words(cv, line, x0, top + 230 + i * size * 1.18, size, f.type, 700, self.t0 + 0.1 + 0.11 * i, t, out,
+                            size)
+            if self.data.get("by"):
+                by = f.type.text(self.data["by"], 24, 500, f.text2)
+                cv.draw(by, x0, top + 260 + len(self.lines) * size * 1.18, alpha=out * smooth(ramp(t, self.key - 0.2, self.key + 0.2)),
+                        anchor=(0, by.baseline / by.h))
+        else:  # stat
+            val = str(self.data.get("value", "100"))
+            k = ease_out(ramp(t, self.t0, self.t0 + 0.8), 3.0)
+            txt = _roll(val, k)
+            size = 330.0 if not f.portrait else 260.0
+            sp = self.disp.text(txt, size, 700, f.text_color)
+            yb = f.CY + 20
+            cv.draw(sp, x0, yb + 30 * (1 - smooth(ramp(t, self.t0 - 0.1, self.t0 + 0.3))), alpha=out *
+                    smooth(ramp(t, self.t0 - 0.1, self.t0 + 0.2)), anchor=(0, sp.baseline / sp.h))
+            u = ease_in_out(ramp(t, self.t0 + 0.1, self.t0 + 0.9), 2.0)
+            wv = self.disp.width(val, size, 700)
+            cv.light_path(Path([(x0, yb + 30), (x0 + wv, yb + 30)]), u, tail=0.8, color=self.color, width=6,
+                          energy=1.1 * out)
+            size2 = 56.0 if not f.portrait else 44.0
+            for i, line in enumerate(self.lines):
+                self._words(cv, line, x0, yb + 110 + i * size2 * 1.2, size2, f.type, 500, self.t0 + 0.5 + 0.1 * i, t,
+                            out, size2)
+
+
+# ===========================================================================
 
 def build_scenes(film, acts):
+    from . import scenes_motion  # noqa: F401  (registers type, morph, orbit, tunnel, success, montage, grid)
     try:
         import importlib.util
         cp = os.path.join(film.dir, "custom_scenes.py")
@@ -1926,9 +2275,15 @@ def build_scenes(film, acts):
         if cls is None:
             raise ValueError(f"unknown scene '{a['scene']}'. Known: {sorted(SCENES)}")
         dur = (end - start) * w / tot
-        sc = cls(film, a, i, t, t + dur)
+        t1 = t + dur
+        if i < len(acts) - 1:
+            # every transition lands on a beat of the music (min ~1 s per scene)
+            s1 = film.snap(t1, "beat")
+            if s1 - t >= 1.0 and end - s1 >= 1.0:
+                t1 = s1
+        sc = cls(film, a, i, t, t1)
         out.append(sc)
-        t += dur
+        t = t1
     for i, sc in enumerate(out):
         sc.prev = out[i - 1] if i else None
         sc.next = out[i + 1] if i + 1 < len(out) else None

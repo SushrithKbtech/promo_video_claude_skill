@@ -107,12 +107,41 @@ class Film:
         self._sprites = {}
 
         # ---- timing grid -------------------------------------------------
-        self.bpm = float(b.get("bpm", 100))
-        self.bar = 240.0 / self.bpm
-        self.beat = self.bar / 4
-        self.d0 = 0.60
+        # With the user's own track the grid comes from its real beats: the track is offset so its
+        # drop lands on the logo hit, and every downbeat of the film is a downbeat of the song.
+        from .beatmap import Grid, analyze
         dur = float(b.get("duration", 21.8))
-        self.hit_bar = max(4, int(round((dur - 4.4 - self.d0) / self.bar)))
+        mspec = b.get("music", {})
+        self.track = None
+        self.track_offset = 0.0
+        if mspec.get("file"):
+            tp = mspec["file"] if os.path.isabs(mspec["file"]) else os.path.join(self.dir, mspec["file"])
+            self.track = analyze(tp, os.path.join(self.dir, ".cache"))
+            self.track_path = tp
+            drop_at = float(mspec.get("drop_at", self.track["drop_at"]))
+            tdb = np.array(self.track["downbeats"])
+            if len(tdb):  # a drop is always a downbeat of the song
+                drop_at = float(tdb[np.argmin(np.abs(tdb - drop_at))])
+            self.bpm = float(self.track["bpm"])
+            # hit_at: film time where that drop lands (the logo hit); by default near the end
+            target = float(mspec.get("hit_at", max(4.0 * 240.0 / self.bpm + 0.6, dur - 4.4)))
+            self.track_offset = target - drop_at
+            self.grid = Grid(self.bpm, beats=np.array(self.track["beats"]) + self.track_offset,
+                             downbeats=np.array(self.track["downbeats"]) + self.track_offset)
+            dbs = self.grid.downbeats_from(0.45)
+            self._downbeats = dbs
+            self.d0 = float(dbs[0])
+            k_hit = int(np.argmin(np.abs(dbs - target)))
+            self.hit_bar = max(4, k_hit)
+            self.bar = float(np.median(np.diff(dbs[:max(2, self.hit_bar + 1)]))) if len(dbs) > 2 else 240.0 / self.bpm
+        else:
+            self.bpm = float(b.get("bpm", 100))
+            self.d0 = 0.60
+            self.grid = Grid(self.bpm, d0=self.d0)
+            self._downbeats = None
+            self.bar = 240.0 / self.bpm
+            self.hit_bar = max(4, int(round((dur - 4.4 - self.d0) / self.bar)))
+        self.beat = self.bar / 4
         self.slam = self.D(0)
         self.hit = self.D(self.hit_bar)
         self.signature = b.get("signature", "none")      # the shape the light takes (motifs.py)
@@ -130,18 +159,55 @@ class Film:
         self.opening = b.get("opening", "slam")          # "slam" (logo first) | "cold" (logo only at the end)
         self.cold = self.opening == "cold"
         self.acts_start = self.d0 if self.cold else self.D(1)
+        self._energy_setup(b)
 
         # ---- scenes ------------------------------------------------------
         from .scenes import build_scenes
+        self.voice = self._load_voice()      # read first: kinetic type lands with the spoken words
         self.scenes = build_scenes(self, b.get("acts", []))
         self._lockup_layout()
         self.particles = ParticleField(self.DW, self.DH, self.duration + 1, self._particle_speed,
                                        colors=self.facet_colors, n=150 if not self.portrait else 170)
-        self.voice = self._load_voice()
 
     # ------------------------------------------------------------------
     def D(self, k):
+        """Time of the k-th downbeat after the opening hit (the song's own downbeats with a track)."""
+        if self._downbeats is not None:
+            k = int(round(k)) if abs(k - round(k)) < 1e-6 else k
+            if float(k).is_integer() and 0 <= int(k) < len(self._downbeats):
+                return float(self._downbeats[int(k)])
+            i = int(np.floor(k))
+            i = max(0, min(i, len(self._downbeats) - 2))
+            return float(self._downbeats[i] + (k - i) * (self._downbeats[i + 1] - self._downbeats[i]))
         return self.d0 + k * self.bar
+
+    def snap(self, t, grid="beat", within=None):
+        """Put a moment on the music: the nearest beat, downbeat or half-beat."""
+        return self.grid.snap(t, grid, within)
+
+    def display_type(self):
+        """Typesetter for the condensed display face used by editorial cards (brief.font.display)."""
+        if getattr(self, "_display", None) is None:
+            from .brand import fetch_google_font
+            fam = self.brief.get("font", {}).get("display", "Oswald")
+            fonts = {}
+            try:
+                fonts = fetch_google_font(fam, os.path.join(self.dir, "assets", "fonts"), weights=(700,)) or                     fetch_google_font(fam, os.path.join(self.dir, "assets", "fonts"), weights=(400,))
+            except Exception:
+                fonts = {}
+            if fonts:
+                path = list(fonts.values())[0]
+                fonts = {400: path, 500: path, 700: path}
+            else:
+                fonts = self.fonts
+            self._display = Typesetter(fonts, self.S)
+        return self._display
+
+    def wm_type(self):
+        """The wordmark's face: the body face, or the display face ("wordmark_font": "display")."""
+        if self.brief.get("brand", {}).get("wordmark_font") == "display":
+            return self.display_type()
+        return self.type
 
     def sprite(self, key, fn):
         if key not in self._sprites:
@@ -187,7 +253,7 @@ class Film:
         """Where the icon and wordmark sit in the lockup (both lockups)."""
         icon_h = 230.0 if not self.portrait else 210.0
         size = 132.0 if not self.portrait else 112.0
-        tw = self.type.width(self.wordmark, size, self.wordmark_weight)
+        tw = self.wm_type().width(self.wordmark, size, self.wordmark_weight)
         iw = icon_h * self.logo.aspect
         gap = icon_h * 0.2
         total = iw + gap + tw
@@ -195,7 +261,7 @@ class Film:
             # stacked lockup for narrow frames
             self.stacked = True
             size = min(size, self.DW * 0.8 / max(1.0, tw / size))
-            tw = self.type.width(self.wordmark, size, self.wordmark_weight)
+            tw = self.wm_type().width(self.wordmark, size, self.wordmark_weight)
             self.lock_icon = (self.CX, self.CY - size * 0.75, icon_h)
             self.lock_text = (self.CX - tw / 2, self.CY + icon_h * 0.5 + size * 0.55, size, tw)
         else:
@@ -411,7 +477,7 @@ class Film:
             if second and t > self.end_t:
                 continue
             x0, base_y, size, tw = self.lock_text
-            sp = self.type.text(self.wordmark, size, self.wordmark_weight,
+            sp = self.wm_type().text(self.wordmark, size, self.wordmark_weight,
                                 self.brief.get("brand", {}).get("wordmark_color", self.text_color))
             prog = ease_in_out(ramp(t, t_start, t_end), 2.2)
             edge = x0 - 40 + (tw + 80) * prog
@@ -561,7 +627,7 @@ class Film:
     def draw_handovers(self, cv, t):
         for i in range(len(self.scenes) - 1):
             a, b = self.scenes[i], self.scenes[i + 1]
-            if b.transition in ("whip", "cut", "wipe", "push"):
+            if b.transition in ("whip", "cut", "wipe", "push", "shape"):
                 continue
             t0 = b.a - 0.05
             t1 = b.land
@@ -675,12 +741,21 @@ class Film:
         rise = 14 * (1 - ease_out(ramp(lt, 0.15, 0.85)))
         a_txt = smooth(ramp(lt, 0.15, 0.6)) * fade
         style = ec.get("style", "credit")
-        if style == "cta":
+        if style in ("cta", "tagline"):
             top = ec.get("headline", self.brief.get("tagline", ""))
             big = ec.get("url", "")
         else:
             top = ec.get("top", "made by")
             big = ec.get("name", "your name")
+        if style == "tagline":
+            # the line is the hero: big in the display face, the address small under the light
+            if top:
+                sp = self.display_type().text(top, 84 if not self.portrait else 64, 500, self.text_color)
+                cv.draw(sp, self.CX, y_line - 44 + rise, alpha=a_txt, anchor=(0.5, sp.baseline / sp.h))
+            if big:
+                sp = self.type.text(big, 30, 400, self.text2)
+                cv.draw(sp, self.CX, y_line + 62 + rise, alpha=a_txt, anchor=(0.5, sp.baseline / sp.h))
+            big = top = None
         if top:
             sp = self.type.text(top, 30, 400, self.text2)
             cv.draw(sp, self.CX, y_line - 118 + rise, alpha=a_txt, anchor=(0.5, sp.baseline / sp.h))
@@ -782,10 +857,75 @@ class Film:
             return None
         return lerp(-40.0, self.DW + 40.0, ease_in_out(ramp(t, t0, t0 + self.WIPE), 2.2))
 
+    SHAPE = 0.55
+
+    def _shape_geo(self, sc, t):
+        """The growing reveal shape of an incoming 'shape' scene: (kind, centre, size, k, rot) or None."""
+        t0 = sc.a - 0.05
+        if not (t0 <= t < t0 + self.SHAPE):
+            return None
+        k = ease_in_out(ramp(t, t0, t0 + self.SHAPE), 2.0)
+        kind = sc.spec.get("shape", "star")
+        c = np.array(sc.prev.exit() if sc.prev is not None else (self.CX, self.CY), float)
+        c = np.clip(c, (self.DW * 0.2, self.DH * 0.2), (self.DW * 0.8, self.DH * 0.8))
+        diag = math.hypot(self.DW, self.DH)
+        size = k * diag * {"circle": 1.05, "star": 2.3, "logo": 3.2}.get(kind, 2.3)
+        return kind, c, size, k, -math.pi / 2 + 0.7 * k
+
+    def _shape_poly(self, kind, c, size, rot):
+        if kind == "circle":
+            q = np.linspace(0, 2 * math.pi, 120)
+            return np.stack([c[0] + size * np.cos(q), c[1] + size * np.sin(q)], 1)
+        pts = []
+        for i in range(10):            # a five-point star with soft-ish proportions
+            r = size if i % 2 == 0 else size * 0.46
+            a = rot + i * math.pi / 5
+            pts.append((c[0] + r * math.cos(a), c[1] + r * math.sin(a)))
+        return np.array(pts)
+
+    def shape_mask(self, cv, sc, t):
+        """Full-frame mask (canvas pixels) of what an incoming 'shape' scene reveals, or None."""
+        g = self._shape_geo(sc, t)
+        if g is None:
+            return None
+        kind, c, size, k, rot = g
+        if kind == "logo":
+            a = self._sprites.get("shape_alpha")
+            if a is None:
+                # the mark's filled silhouette (outer contours, holes filled), so outline logos open too
+                al = (self.logo.rgba8[..., 3] > 127).astype(np.uint8)
+                cs, _ = cv2.findContours(al, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+                sil = np.zeros_like(al)
+                cv2.drawContours(sil, cs, -1, 1, thickness=-1)
+                a = self._sprites["shape_alpha"] = cv2.GaussianBlur(sil.astype(np.float32), (0, 0), 2.0)
+            s = max(1e-3, size * cv.S / max(a.shape))
+            M = np.float32([[s, 0, c[0] * cv.S - s * a.shape[1] / 2], [0, s, c[1] * cv.S - s * a.shape[0] / 2]])
+            m = cv2.warpAffine(a, M, (cv.W, cv.H), flags=cv2.INTER_LINEAR)
+            return np.maximum(m, smooth(ramp(k, 0.72, 1.0)))   # the holes of the mark fill in at the end
+        m = np.zeros((cv.H, cv.W), np.uint8)
+        pts = np.round(self._shape_poly(kind, c, size, rot) * cv.S * 16).astype(np.int32)
+        cv2.fillPoly(m, [pts], 255, cv2.LINE_AA, 4)
+        return m.astype(np.float32) / 255.0
+
+    def draw_shapes(self, cv, t):
+        for sc in self.scenes:
+            if sc.transition != "shape" or sc.i == 0:
+                continue
+            g = self._shape_geo(sc, t)
+            if g is None or g[0] == "logo":
+                continue
+            kind, c, size, k, rot = g
+            pts = self._shape_poly(kind, c, size, rot)
+            cv.light_poly(np.vstack([pts, pts[:1]]), lin(sc.color), 1.1 * math.sin(math.pi * k) + 0.15, width=4.0)
+
     def transition_state(self, sc, t):
         """(zoom, fade, region) for a scene at t, from wipe / push transitions; None = hidden."""
         zoom, fade, region = 1.0, 1.0, None
         nxt = sc.next
+        if nxt is not None and nxt.transition == "shape" and t >= nxt.a - 0.05 + self.SHAPE:
+            return None
+        if sc.transition == "shape" and sc.i > 0 and t < sc.a - 0.05:
+            return None
         if nxt is not None and nxt.transition == "wipe":
             t0 = nxt.a - 0.05
             if t >= t0 + self.WIPE:
@@ -832,10 +972,100 @@ class Film:
     def whip_blur(self, t):
         return sum(130 * math.exp(-((t - sc.a) / 0.07) ** 2) for sc in self.scenes if sc.transition == "whip" and sc.i)
 
+    # ------------------------------------------------------------------
+    # energy: the picture moves with the music (beat punches, pre-drop suck-in, drop impacts)
+    # ------------------------------------------------------------------
+    ENERGY = {"hype": 1.0, "normal": 0.55, "calm": 0.0}
+
+    def _energy_setup(self, b):
+        mode = b.get("energy", {"launch": "hype", "reel": "hype", "showcase": "calm"}.get(self.format, "normal"))
+        self.energy_amp = self.ENERGY.get(mode, 0.55) if isinstance(mode, str) else float(mode)
+        self.energy_mode = mode
+        if self.track is not None:
+            from .beatmap import bar_map_cached
+            rows = bar_map_cached(self.track_path, self.track, os.path.join(self.dir, ".cache"))
+            lows = np.array([r["low_db"] for r in rows]) if rows else np.array([0.0])
+            full = float(np.percentile(lows, 90))
+            # each bar's energy from its low end, relative to the song's loudest bars
+            self._bars = [(r["t"] + self.track_offset, float(np.clip((r["low_db"] - (full - 30)) / 30, 0, 1)))
+                          for r in rows]
+            drops = [r["t"] + self.track_offset for r in rows if r["mark"] == "DROP"]
+        else:
+            self._bars = [(-1.0, 0.25), (self.drop, 1.0)]
+            drops = [self.drop]
+        drops.append(self.hit)
+        self.drops = sorted({round(d, 3) for d in drops if 0.5 < d < self.duration - 0.5})
+
+    def energy(self, t):
+        e = 0.0
+        for t0, v in self._bars:
+            if t0 <= t + 1e-3:
+                e = v
+            else:
+                break
+        return e
+
+    def beat_punch(self, t):
+        """0..~1.5: a kick on every beat, harder on downbeats, scaled by the section's energy."""
+        if self.energy_amp <= 0:
+            return 0.0
+        g = self.grid
+        i = int(np.searchsorted(g.beats, t + 1e-4))
+        v = 0.0
+        for bt in g.beats[max(0, i - 3):i]:
+            lt = t - bt
+            if 0 <= lt < 0.35:
+                down = np.min(np.abs(g.downbeats - bt)) < 0.04
+                v += (1.0 if down else 0.45) * math.exp(-lt / 0.075)
+        return min(1.5, v) * self.energy(t) * self.energy_amp
+
+    def _drop_state(self, t):
+        """(suck-in 0..1 before a drop, time since the last drop or None)."""
+        suck, since = 0.0, None
+        for d in self.drops:
+            if d - self.bar <= t < d:
+                suck = max(suck, ease_in(ramp(t, d - self.bar, d), 2.6))
+            if 0 <= t - d < 0.6:
+                since = t - d
+        return suck, since
+
+    def picture_energy(self, t):
+        """Post-camera values for this frame: zoom multiplier, flash, RGB split."""
+        amp = max(self.energy_amp, 0.35)          # drops always land, even in a calm film
+        suck, since = self._drop_state(t)
+        zoom = 1.0 + 0.026 * self.beat_punch(t) + 0.075 * suck * amp
+        flash = split = 0.0
+        if since is not None:
+            flash = math.exp(-since / 0.09) * amp
+            split = 7.0 * math.exp(-since / 0.11) * amp
+            zoom += 0.05 * math.exp(-since / 0.12) * amp     # the punch out of the suck-in
+        for sc in self.scenes[1:]:
+            if sc.transition in ("cut", "whip") and 0 <= t - sc.a < 0.12 and self.energy(sc.a) > 0.5:
+                split = max(split, 3.5 * (1 - (t - sc.a) / 0.12) * self.energy_amp)
+        return zoom, flash, split
+
+    def draw_drops(self, cv, t):
+        """A ring of light blasts out from the centre on every drop."""
+        col = lin(self.brief.get("brand", {}).get("primary") or self.facet_colors[0])
+        for d in self.drops:
+            lt = t - d
+            if not (0 <= lt < 0.55):
+                continue
+            k = ease_out(lt / 0.55, 2.2)
+            R = 60 + k * math.hypot(self.DW, self.DH) * 0.62
+            q = np.linspace(0, 2 * math.pi, 140)
+            ring = np.stack([self.CX + R * np.cos(q), self.CY + R * np.sin(q)], 1)
+            cv.light_poly(ring, col, 1.3 * (1 - k), width=6.0 + 10 * (1 - k))
+
     def shake(self, t):
         dx = dy = 0.0
         hit_amp = {"race": 9.0 if self.cold else 7.0, "cut": 9.0}.get(self.ending, 0.0)
-        for t0, amp in (((self.slam, 11.0),) if not self.cold else ()) + ((self.hit, hit_amp),):
+        kicks = (((self.slam, 11.0),) if not self.cold else ()) + ((self.hit, hit_amp),)
+        # every drop of the song shakes the camera too (the hit keeps its own amount)
+        kicks += tuple((d, 8.0 * max(self.energy_amp, 0.35)) for d in self.drops if abs(d - self.hit) > 0.05)
+        if hit_amp <= 0:
+            kicks += ((self.hit, 6.0 * max(self.energy_amp, 0.35)),)
+        for t0, amp in kicks:
             if amp <= 0:
                 continue
             lt = t - t0
@@ -854,7 +1084,7 @@ class Film:
         Canvas._stage_lin = lin(self.stage_color)
         pl = max([pulse(t, h, 0.03, 0.4) for h in self.hits()] + [0.0])
         stage_background(cv, t, self.stage_color, self.tint(t), float(self.brief.get("stage", {}).get("strength", 0.16)),
-                         pl, dark=self.stage_mode == "dark")
+                         pl, dark=self.stage_mode == "dark", backdrop=self.brief.get("stage", {}).get("backdrop", "blobs"))
         pf = 1.0 - 0.35 * smooth(ramp(t, self.end_t, self.end_t + 0.5))
         self.particles.draw(cv, t, fade=pf)
         self.draw_hook(cv, t)
@@ -872,9 +1102,21 @@ class Film:
                     cv.off = (0.0, 0.0)
                     continue
                 cv.zoom, cv.fade, cv.region = st
-                sc.draw(cv, t)
-                cv.off, cv.zoom, cv.fade, cv.region = (0.0, 0.0), 1.0, 1.0, None
+                # a 'shape' transition: the next scene shows inside the growing shape, this one outside
+                td = t
+                if sc.transition == "shape" and sc.i > 0:
+                    cv.mask = self.shape_mask(cv, sc, t)
+                elif sc.next is not None and sc.next.transition == "shape":
+                    m = self.shape_mask(cv, sc.next, t)
+                    cv.mask = None if m is None else 1.0 - m
+                    td = min(t, sc.b - 0.16)    # hold the outgoing picture until the shape has covered it
+                elif sc.next is not None and sc.next.transition == "wipe":
+                    td = min(t, sc.b - 0.16)    # the same for a wipe: the line, not a fade, takes it away
+                sc.draw(cv, td)
+                cv.off, cv.zoom, cv.fade, cv.region, cv.mask = (0.0, 0.0), 1.0, 1.0, None, None
         self.draw_wipes(cv, t)
+        self.draw_shapes(cv, t)
+        self.draw_drops(cv, t)
         self.draw_peel(cv, t)
         self.draw_handovers(cv, t)
         self.draw_race(cv, t)
@@ -890,7 +1132,10 @@ class Film:
         if wb > 0.6:
             k = max(3, int(wb * self.S) | 1)
             img = cv2.blur(img, (k, 1))
-        return post(cv, img, t, index, shake=self.shake(t), breath=0.008, vignette=0.07, grain=0.005)
+        zoom, flash, split = self.picture_energy(t)
+        fc = lin(self.brief.get("brand", {}).get("primary") or self.facet_colors[0])
+        return post(cv, img, t, index, shake=self.shake(t), breath=0.008, vignette=0.07, grain=0.005,
+                    zoom_mul=zoom, flash=flash, flash_color=fc, split=split)
 
     # ------------------------------------------------------------------
     # sound cues (read by the mixer)
@@ -911,6 +1156,12 @@ class Film:
                 dict(t=self.slam + 1.52, kind="confirm", gain=-19),
                 dict(t=self.D(1) - 0.02, kind="whoosh_hit", gain=-13, pan=0.3),
             ]
+        # the song's drops: a sucking whoosh into each one, then a sub impact under the flash
+        for d in self.drops:
+            if abs(d - self.hit) < 0.05 and self.ending in ("race", "cut"):
+                continue          # those endings already hit hard
+            c += [dict(t=d - 0.42, kind="whoosh_fast", gain=-15), dict(t=d, kind="impact", gain=-11),
+                  dict(t=d + 0.01, kind="pop_low", gain=-15)]
         for i, sc in enumerate(self.scenes):
             c += sc.cues()
             if not i:
@@ -921,6 +1172,8 @@ class Film:
                 c += [dict(t=sc.a - 0.05, kind="swoosh", gain=-14, dur=0.55), dict(t=sc.a + 0.15, kind="shimmer", gain=-22)]
             elif sc.transition == "push":
                 c += [dict(t=sc.a - 0.05, kind="whoosh_hit", gain=-12), dict(t=sc.a, kind="pop_low", gain=-17)]
+            elif sc.transition == "shape":
+                c += [dict(t=sc.a - 0.05, kind="swirl", gain=-15, dur=0.5), dict(t=sc.a + 0.3, kind="pop_low", gain=-18)]
             elif sc.transition == "cut":
                 c.append(dict(t=sc.a, kind="transient", gain=-14))
             else:
@@ -957,7 +1210,7 @@ class Film:
         out = []
         for i in range(len(self.scenes) - 1):
             a, b = self.scenes[i], self.scenes[i + 1]
-            if b.transition in ("whip", "cut", "wipe", "push"):
+            if b.transition in ("whip", "cut", "wipe", "push", "shape"):
                 continue
             p0, p1 = np.array(a.exit(), float), np.array(b.entry(), float)
             if np.linalg.norm(p1 - p0) < 300:

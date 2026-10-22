@@ -75,19 +75,39 @@ a glint, pastel or glow stage blobs that breathe, particles, vignette and grain.
 | `features` | a bento grid traced card by card |
 | `phone` | the tap, then the notification |
 | `product` | a rim light on a product photo, specular sweep, spec call-outs |
+| `signature` | the product's own motif (a heartbeat, a sound wave, circuit traces...) as a hero moment |
+| `diorama` | the UI becomes a physical set on a table, filmed by a 3D camera with macro depth of field; a mascot hops across it |
+| `card` | bold editorial cards: condensed headlines, big quotes, counting stats |
+| `type` | kinetic typography in six styles: words built around an inline logo, a sentence that rewrites itself, a giant gradient word, a keyword cloud at depth, 3D tilted type, a teaser that blurs in and slides apart |
+| `morph` | one container that keeps becoming the next thing: a pill, a glowing bar, an answer card |
+| `orbit` | items circling the product in 3D, then converging into it |
+| `tunnel` | cards on a rotating 3D ring around a headline |
+| `grid` | integration or team tiles popping onto a tilted 3D plane |
+| `success` | a big check and a burst of 3D confetti |
+| `montage` | your images cut on every beat with a push-in and an optional cinematic grade |
 
 **Real UI:** show your actual product. Screenshots, live pages, or frames pulled from a demo
 video go into a browser window that tilts in, while the camera pushes in on each detail, the rest
-dims, the light traces it and a label pops in.
+dims, the light traces it and a label pops in. Site capture scrolls every page in headless Chrome,
+so sections that animate in on scroll are captured too, and it can take a time-lapse of a live
+demo playing on the page.
 
 **Sound:** an original score written to the picture's beat grid in eight moods (hype, uplifting,
 dark, cinematic, chill, house, acoustic, minimal). Every product gets its own song: a seed from the
 product picks the progression, key, lead instrument (pluck, FM electric piano, bells, Karplus-Strong
 guitar, glass, strings) and drum patterns. About 50 designed sound effects; a voice-over placed so
 every key word lands on its beat; ducking; mastered to -14 LUFS with true peak below -1 dBTP. Or
-bring your own track: the engine finds its BPM and drop and lands the logo hit on it.
+bring your own track: a beat tracker follows the song's real tempo, maps its sections (build,
+drop, breakdown), puts every cut on a beat, the product reveal on a drop and the logo hit on the
+last one. Kinetic type lands on the narrator's words.
 
-**Made for the product:** the light takes the product's own shape (a heartbeat for health, a sound
+**Cut to the music:** the picture pumps on every beat in the song's loud sections, sucks in over
+the bar before a drop and explodes on it (flash, RGB split, shockwave ring of light, shake, sub
+impact). Quiet intros stay quiet; `"energy": "hype"` turns it all the way up.
+
+**Made for the product:** a fit guide tells Claude which effects suit which products (a mascot on
+a 3D set for a video editor, a heartbeat and real UI for a care product, a board of agents in orbit
+and sourced cards for a decision tool) and what to avoid (confetti on a medical product). The light takes the product's own shape (a heartbeat for health, a sound
 wave for audio, circuit traces for dev tools, a route for maps and delivery, a climbing line for
 finance) in every transition and in a hero moment, and the sound effects come from a palette that
 fits (organic, digital, cinematic, soft, punchy, mechanical, clean), tuned per product.
@@ -97,8 +117,8 @@ music, voice) and you say yes or change anything.
 
 **No two films alike:** six film formats with different shapes (journey, keynote, launch, story,
 showcase, reel), four endings (lights race into the logo, an understated reveal, a hard cut, the
-name written by light), logo-first or cold openings, two hooks, light or dark stages, 13 scenes plus
-custom ones, six transition types (light hand-over, whip, cut, wipe, push, morph), a score composed per product, and a history of past films so
+name written by light), logo-first or cold openings, two hooks, light or dark stages with five
+backdrops, 22 scenes plus custom ones, seven transition types (light hand-over, whip, cut, wipe, push, shape reveal, morph), a score composed per product, and a history of past films so
 the director changes the recipe every time.
 
 ## How it works
@@ -117,14 +137,14 @@ minutes on a laptop.
 
 ```bash
 python run.py doctor
-python run.py capture https://example.com ./promo-example
+python run.py capture https://example.com ./promo-example --pages about,pricing
 python run.py voice   ./promo-example
 python run.py stills  ./promo-example            # key moments + contact sheet
 python run.py sheet   ./promo-example --every 0.5
 python run.py preview ./promo-example            # 960x540 @ 30 with full mix
 python run.py final   ./promo-example            # 1920x1080 @ 60 with full mix
 python run.py check   ./promo-example
-python run.py music-info my_track.mp3            # BPM + drop time of your own song
+python run.py music-info my_track.mp3            # BPM, beats and a bar-by-bar map of your song
 ```
 
 `examples/` has two fictional brands (light and dark) you can render straight away.

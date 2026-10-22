@@ -63,6 +63,14 @@ folder (put it where the user works, e.g. `./promo-<product>/`) holding `brief.j
 7. **Put the logo on the song's drop.** The logo hit is a downbeat; the score (or the user's track)
    is built or offset so its biggest moment lands there.
 8. **Every visible move has a sound.** ~50 cues: whooshes, impacts, ticks, keys, pops, chimes.
+8b. **The picture moves with the music.** Plain is the enemy. In the song's loud sections the
+   whole frame kicks on every beat (harder on downbeats); over the bar before each drop the camera
+   sucks in, the screen empties on the last beat, and the drop lands with a flash in the brand
+   colour, an RGB split, a shockwave ring of light, camera shake and a sub impact. Hard cuts in
+   loud sections get a split too. The section energy comes from the song itself (its low end per
+   bar), so quiet intros stay quiet and drops explode. `"energy": "hype" | "normal" | "calm"`
+   sets how hard (default from the format: launch and reel hype, showcase calm, others normal).
+   Use "hype" whenever the user asks for energy, a launch, social, or "keep people watching".
 9. **Iterate cheap, render once.** Half-res stills and a contact sheet first. Look at them.
 
 ---
@@ -73,9 +81,14 @@ folder (put it where the user works, e.g. `./promo-<product>/`) holding `brief.j
 
 - **URL given:** `python "$ENGINE/run.py" capture <url> <PROJECT>` writes `capture.json` (title,
   description, headings, CTAs, nav, CSS brand colours, fonts, Google Fonts) plus
-  `assets/screens/desktop.png`, `mobile.png` and `assets/logo_candidates/`. Read capture.json, Read
-  the screenshots and the logo candidates (images) and decide what the product does. If capture
-  fails (bot protection), use WebFetch / the browser tools or what you know.
+  `assets/screens/desktop.png`, `mobile.png` and `assets/logo_candidates/`. It also scrolls the
+  whole page in a headless Chrome so sections that animate in on scroll are captured
+  (`assets/screens/scroll/home_00.png ...`, 2x). `--pages about,pricing` scrolls more pages;
+  `--hold 765:6:3.5` takes 6 shots 3.5 s apart at scroll position 765 px (for a live demo, a chat
+  or a ticker that plays on the page: the later shots show it finished). It only scrolls and
+  looks. Read capture.json, Read the screenshots and the logo candidates (images) and decide what
+  the product does. If capture fails (bot protection), use WebFetch / the browser tools or what
+  you know.
 - **App / product / idea without a site:** use what the user wrote. Invent nothing that sounds like
   a claim (no fake awards, prices, user counts); keep demo data obviously illustrative.
 - **Logo:** prefer an official SVG (from logo_candidates, the site, or the user). PNG works too.
@@ -116,7 +129,9 @@ Decide, in this order:
 5. **Transitions:** the light hand-over (the light flies from one scene into the next in the
    signature's shape and changes colour along its tail), `whip` (fast pan with motion blur),
    `cut` (hard cut on a beat), `wipe` (a line of light sweeps across and reveals the next scene),
-   `push` (the camera flies through the outgoing scene into the next). Containers persist
+   `push` (the camera flies through the outgoing scene into the next), `shape` (the next scene is
+   revealed inside a growing, turning shape edged with light: act `"shape": "star" | "circle" |
+   "logo"`; the logo kind opens through the brand's own mark). Containers persist
    automatically: search -> share (a row grows into the page), share -> devices (the page flies
    into the laptop). Mix at least three kinds in a film; never the same one three times running.
 6. **Hook:** `"hook": "converge"` (lights sweep in from the edges into the facets) or `"trace"`
@@ -150,6 +165,42 @@ Decide, in this order:
 | physical products (car, device, bottle) | `product` | rim light on the silhouette, spec leaders |
 | works everywhere | `devices` | three lights chase a loop behind the devices |
 | the product's own essence (hero moment) | `signature` | the product's motif drawn across the frame |
+| the UI as a physical object, cinematic | `diorama` | lanes and a playhead on a 3D set; a mascot hops across it |
+| a bold claim, a quote, a number | `card` | underlines the headline, the stat's line draws as it counts |
+| a line said with weight, words on the beat | `type` | six kinetic-type styles (below) |
+| one thing becomes the result (ask -> answer) | `morph` | outlines the container as it grows pill -> bar -> card |
+| many things come together, a team, inputs | `orbit` | rings the product as everything converges into it |
+| breadth: a library, many templates or cards | `tunnel` | hairlines on cards circling a 3D ring around the line |
+| integrations, a bench of specialists, sources | `grid` | tiles pop onto a tilted 3D plane, one per beat |
+| a finished task, a win, "you're done" | `success` | draws the check; 3D confetti bursts |
+| energy, real-world footage, launch teasers | `montage` | cuts the user's images on every beat with a push-in |
+
+`type` styles (`data.style`), each landing on the song's beats, and on the narration's own words
+when the voice-over says the same line (each word appears as it is spoken):
+- `build`: words land one by one around an inline icon (`icon`: "logo" | "star"), the line
+  re-centring as it grows. A product name or a promise.
+- `swap`: a sentence rewrites itself (`phrases`), shared words stay put, new ones rise in. A
+  problem framed in three beats ("Confident." "Confident. Fluent." "Confident. Fluent. Unchecked.").
+- `giant`: one huge gradient word (`word`, `from`, `to`) that springs in, then shrinks for a `sub`.
+- `cloud`: keywords drift at depth around a focus word that changes on the beat (`focus`, `words`).
+- `tilt`: a phrase receding in 3D perspective (`text`). Calm, playful.
+- `teaser`: wide-tracked letters blur in, then slide out sideways (`text`). Pre-drop and "coming soon".
+Any style: `"font": "display"` sets it in the brand's display face (`font.display`), `highlight`
+colours words in the scene's light, `size` sets the size.
+
+`montage` needs `images` (product shots, frames from a demo video, real UI captures) and takes
+`every` (beats per shot) and `grade` ("teal-orange" for footage, "none" for UI). `tunnel` takes
+`images` (cards; real UI cards cropped from captures are best), `words` and `text`. `orbit` takes
+`items` ([{label, color}] 4-8), `text`, `converge`. `grid` takes `items` and `title`. `morph`
+takes `steps` ([{w, h, r, label, icon, glow, lines}]) and `cursor`. `success` takes `text`, `sub`.
+
+`diorama` is the most cinematic scene: the real (or a generated) UI lies on a table like a
+physical slab and a 3D camera flies over it (grazing angles, macro depth of field, warm light,
+contact shadow). Use it once per film, for the hero moment, ideally on the product's own UI. A
+cube mascot in the brand colour can hop across it (squash and stretch, landing debris, a glowing
+playhead); drop the mascot for serious brands. `card` gives a premium social-carousel rhythm
+(condensed display type, highlight words in the light colour) between product shots; never more
+than two cards in a row.
 
 The order of scenes is a story, not a checklist: start where the viewer's problem is (cold open) or
 where the brand is (slam), build to the most impressive proof, and land the logo on the music's
@@ -173,7 +224,13 @@ Music: hype (its own song) · SFX palette: punchy · Voice: Ava (female, warm)
 
 Then ask, with the AskUserQuestion tool when it is available (otherwise a plain question), for
 example: "Render this?" with options "Yes, make it" / "Change the script" / "Different style or
-music" / "Other". Apply what the user says (new lines, scenes, order, voice, mood, length, colours)
+music" / "Other".
+
+**Always ask where the music comes from**, in the same AskUserQuestion call as a second question,
+unless the user already gave a track or said which: "Music: Claude's own score, or your track?"
+with options like "Own score: <the mood you picked> (Recommended)" / "Own score, different mood" /
+"I'll give you a track (mp3/wav path)". With a track, run `music-info` on it, re-plan the scenes on
+its sections (drops, breakdown) and show the updated storyboard timings before rendering. Apply what the user says (new lines, scenes, order, voice, mood, length, colours)
 and show the updated storyboard again only if the change was big. Skip the question only when the
 user already said "just make it", "no questions" or similar, or gave you a complete brief.
 
@@ -259,7 +316,7 @@ more axes from the most recent film unless the user asked for the same look:
 | voice | different voice / gender / accent; or no voice with captions |
 | tempo | `bpm` 84-128 (slower = premium and calm, faster = energy) |
 | pacing | scene `weight`s, 3-6 acts, `duration` |
-| transitions | light hand-overs, morphs, `whip`, `cut` |
+| transitions | light hand-overs, morphs, `whip`, `cut`, `wipe`, `push`, `shape` |
 | scene mix | rebuilt UI, real screenshots, statements, features, product shots, custom scenes |
 
 The score is seeded from the product name, so even two films in the same mood get different
@@ -284,6 +341,39 @@ sounds on the motif's events:
 If none fits, invent the product's own motif in `custom_scenes.py` (a coffee app's steam curl, a
 fashion brand's stitch line) rather than forcing one.
 
+### What fits what (read this before choosing effects)
+
+Every effect means something. Use it only where its meaning is the product's meaning. Mix and
+match freely within a row; borrow from a neighbouring row when the product sits between two.
+
+| product kind | format | signature | stage / backdrop | scenes that fit | transitions | music / SFX | avoid |
+|---|---|---|---|---|---|---|---|
+| health, care, therapy, medical training | `story` | `ecg` | light or warm dark / `blobs` | `screen` (real UI), `card` quote, `signature`, `phone`, `devices` | light, cut | acoustic or uplifting / organic | mascots, `diorama`, confetti, glitchy `digital` SFX |
+| video editors, design, creative tools | `launch` or `journey` | `spark` | dark studio / `grid` | `diorama` with mascot, `montage`, `type` build/giant, `tunnel` of templates | whip, cut, push | hype or house / punchy | slow `keynote` pacing, rings |
+| AI assistants, copilots, chat | `keynote` | `circuit` or `none` | dark / `rings` | `chat`, `morph` (ask -> answer), `type` swap/cloud, `screen` | light, wipe, cut | minimal or uplifting / clean or digital | confetti, cartoon mascots |
+| decision, research, legal, finance, B2B trust | `story` or `keynote` | `circuit` or `rise` | near-black + one brand colour / `rings` | `screen` real UI with highlights, `orbit` (the team), `morph` (a claim gets its source), `grid` (the bench), `card` quote, `type` swap/cloud | cut on drops, push, wipe, light | the user's track or cinematic / clean | confetti, mascots, `giant` gimmicks, bubbly `soft` SFX |
+| integrations, automation, infra | `launch` | `circuit` | dark / `grid` | `orbit` converge, `grid`, `flow`, `chart` | whip, cut | dark or minimal / digital | slow cards |
+| feedback, roadmap, community SaaS | `journey` | `ripple` | light / `ripple` | `type` cloud/giant/swap, `orbit`, `features`, `success` | light, whip | uplifting / clean | heavy cinematic braams |
+| productivity, notes, storage | `journey` | `none` or `spark` | light / `blobs` | `upload`, `search`, `share`, `devices`, `morph` | light hand-overs, morphs | uplifting / clean | dark stages, `montage` |
+| consumer apps, lifestyle, fitness | `reel` or `launch` | `rise` or `ripple` | brand-coloured / `horizon` | `phone`, `success`, `montage`, `type` build | whip, cut | hype or house / punchy or soft | long `screen` walkthroughs |
+| hardware, cars, physical products | `showcase` | `route` or `none` | dark / `horizon` | `product` with specs, `montage` (graded), `type` teaser | cut, light | cinematic or dark / cinematic or mechanical | UI scenes, confetti |
+| launches, "coming soon" teasers | `launch` | `spark` | dark / `horizon` | `type` teaser, `montage`, `giant` | cut on every bar | hype / punchy | voice-over-heavy scripts |
+| education, kids, non-profit | `story` | `spark` | light / `blobs` | `card`, `phone`, `success`, `type` tilt | light | acoustic / organic or soft | dark trailer music |
+
+How to read the meanings:
+- `orbit` = many voices or inputs meeting one thing (a board of agents, integrations, a team).
+  With `converge` they collapse into the product: "they all go after your pitch".
+- `morph` = one thing becoming its answer (a question to a sourced card, a prompt to a page).
+- `tunnel` = abundance (fifteen archetypes, a template library, a catalogue).
+- `grid` = a bench, a toolbox, integrations: things you can call on.
+- `success` + confetti = a personal win. Joyful products only; never health, money, law or grief.
+- `diorama` + mascot = playful craft. Creative tools, editors, games, dev tools with a sense of
+  humour; never a serious or clinical product.
+- `type` swap = framing the problem; `cloud` = a vocabulary (rulings, features, tags);
+  `teaser` = anticipation right before a drop; `build` + logo icon = the name, said once.
+- Real UI (`screen`, `montage` of captures, `tunnel` of cropped cards) beats rebuilt UI whenever
+  the user's product has a site or screenshots. Rebuilt scenes are for the concept around it.
+
 - Different products get different **scenes, order, stage, hook, transitions, mood and pacing**.
   A dev tool: dark, trace hook, `statement` -> `chat` -> `flow` (whip) -> `chart`, mood dark.
   A notes app: light, converge hook, `upload` -> `search` -> `share` -> `devices`, uplifting.
@@ -306,17 +396,20 @@ fashion brand's stitch line) rather than forcing one.
   "duration": 21.8,              // seconds; the hit lands on a downbeat, end card is 2 s after the lockup
   "bpm": 100,                    // the picture grid; set it to the track's BPM when using a track
   "format": "journey",           // journey | keynote | launch | story | showcase | reel (fills the rest)
+  "energy": "normal",            // hype | normal | calm: beat punches, drop impacts (default from format)
   "signature": "none",           // ecg | wave | circuit | route | ripple | rise | spark | none
   "sfx": {"palette": "clean"},   // clean | punchy | organic | soft | digital | cinematic | mechanical
   "ending": "race",              // race | reveal | cut | write
   "opening": "slam",             // "slam" (logo first) | "cold" (logo only at the end)
   "hook": "converge",            // "converge" | "trace"  (with "cold", lights converge into scene 1)
-  "stage": {"mode": "light", "color": "#FAFAFB", "strength": 0.16},   // dark: {"mode": "dark", "color": "#06070B"}
+  "stage": {"mode": "light", "color": "#FAFAFB", "strength": 0.16,    // dark: {"mode": "dark", "color": "#06070B"}
+            "backdrop": "blobs"},        // blobs | horizon (a planet rim) | rings (a round table) | ripple | grid (a floor)
   "brand": {
     "name": "Prism",             // used for defaults ("Search in Prism") and the output file name
     "wordmark": "Prism Drive",   // text written in the lockup
     "wordmark_weight": 400,
     "wordmark_color": "#1F1F1F", // optional; the brand's wordmark colour
+    "wordmark_font": "body",     // "display" writes the wordmark in font.display (a serif brand, say)
     "logo": "assets/logo.svg",   // SVG best; PNG ok
     "facets": "auto",            // "auto" | "paths" (one per SVG shape) | "colors" | "none"
     "facet_count": 2,            // optional, for "colors": how many colour facets
@@ -324,7 +417,7 @@ fashion brand's stitch line) rather than forcing one.
     "palette": ["#3186FF", "#0EBC5F", "#FEC700"]   // fallback lights for monochrome logos
   },
   "lights": ["#0EBC5F", "#FEC700", "#3186FF"],     // optional: one per act, in order
-  "font": {"family": "Inter"},   // any Google Fonts family; or {"400": "path.ttf", "500": ..., "700": ...}
+  "font": {"family": "Inter", "display": "Oswald"},  // body + condensed display face (cards); any Google Fonts
   "ink": {"text": "#1F1F1F", "secondary": "#5F6368"},
   "acts": [
     {"scene": "upload", "data": {...}, "weight": 2.3, "light": 0, "transition": "light"}
@@ -341,6 +434,8 @@ fashion brand's stitch line) rather than forcing one.
   "end_card": {"style": "credit", "top": "made by", "name": "Your Name",
                "small": "Spec ad · not affiliated with Acme"},
   // or {"style": "cta", "headline": "Start free today", "url": "acme.com"}
+  // or {"style": "tagline", "headline": "A verdict, not a compliment.", "url": "acme.com", "hold": 5}
+  //    (the line is the hero in the display face, the address small under the light; "hold" = seconds)
   "output_name": "prism_spec_ad"
 }
 ```
@@ -361,7 +456,8 @@ product `sheen s1 s2..`, phone `tap`, statement `written`. Offsets work: `"hit+0
 - `devices`: `chip` ("Synced"), `screen` / `tablet` / `mobile` (screenshot paths for the screens).
 - `flow`: `nodes` ([{label, kind}] 3-5), `result` ("Done").
 - `chart`: `series` (numbers), `value` ("+38%", "$1.2M"), `label`, `title`.
-- `chat`: `placeholder`, `prompt`, `answer` (3-4 short lines).
+- `chat`: `placeholder`, `prompt`, `answer` (3-4 short lines), `scale` (1.0-1.4; bigger for a
+  cold open where the chat is the whole frame).
 - `screen`: `image` (a real screenshot or video frame), `crop` ([x0, y0, x1, y1] to cut the UI out
   of a larger frame), `url` (shown in the browser bar), `frame` ("browser" | "bare"), `enter`
   ("tilt" | "rise" | "slide"), `tilt` (entry yaw in degrees; sign picks the side), `highlights`
@@ -372,6 +468,17 @@ product `sheen s1 s2..`, phone `tap`, statement `written`. Offsets work: `"hit+0
 - `features`: `items` ([{title, desc, kind}] 3-6).
 - `phone`: `image` (app screenshot, optional), `title`, `rows`, `tap`, `notify` ({title, body}).
 - `product`: `image` (transparent PNG best), `specs` ([{value, at: [x, y] 0-1 on the image}]).
+- `diorama`: `image` + `crop` (the UI texture; omit for a generated dark editor with timeline
+  lanes), `camera` ("swoop" | "flyover" | "orbit" | "reveal" | "follow"), `mascot`
+  ({color, size} or false), `path` ([[u, v] ...] 0-1 on the image: the hops; keep them on a band of
+  the UI near the camera), `lanes` ([{v, u0, u1, color}] glowing bars that grow behind the mascot),
+  `playhead` (true), `title` ({text, rect: [u0, v0, u1, v1], color} glowing on the UI, like a
+  title on the app's preview), `table` (hex), `key_light` (hex), `dof` (0-1.5). Anchors: `go`,
+  `l1 l2 ..` (each landing), `key` (the last landing).
+- `card`: `layout` ("headline" | "quote" | "stat"), `lines` (2-3 short lines; UPPERCASE for
+  headlines), `highlight` (words drawn in the light colour), `value` (stat: "390", "4", "$1.2M"),
+  `by` (quote attribution). The display face is `font.display` (any Google Fonts family; default
+  Oswald).
 - `signature`: `lines` (1-2 short lines above the trace), `highlight` (one word in the light colour),
   `kind` (a motif other than the film's `signature`). Anchors: `key`, `e1 e2 ..` (each heartbeat,
   node or pin).
@@ -404,10 +511,23 @@ product `sheen s1 s2..`, phone `tap`, statement `written`. Offsets work: `"hit+0
   - `digital`: bit-crushed zaps and ticks (dev tools, AI, crypto, gaming).
   - `cinematic`: low booms, big rooms (cars, hardware, epic launches).
   - `mechanical`: servo whines under the moves (hardware, robotics, automotive).
-- `music.file`: the user's own track (mp3/wav/m4a). `python "$ENGINE/run.py" music-info track.mp3`
-  prints its BPM and drop time; set `bpm` to it. The engine offsets the track so its drop lands on
-  the logo hit, thins it before the hit and fades it under the end card. Optional
-  `music.drop_at` (seconds in the track) overrides detection.
+- `music.file`: the user's own track (mp3/wav/m4a). The whole film then runs on the song:
+  - `python "$ENGINE/run.py" music-info track.mp3` prints the BPM, the downbeats and a bar-by-bar
+    map of the song (loudness, low end, and where it builds, drops and breaks down). Read it.
+  - Beats come from a tracker that follows the song's real tempo drift, not a metronome, so cuts
+    stay on the beat for the whole minute. Every scene boundary snaps to a beat of the song, and
+    kinetic type lands on the narration's words.
+  - `music.drop_at`: the drop (track seconds) that lands on the logo hit; it snaps to the
+    nearest detected downbeat, so use the map's DROP rows. `music.hit_at`: the film time of that
+    hit (default: 4.4 s before the end). The track is offset by `hit_at - drop_at`.
+  - Then place scenes on the song's sections in film time (track time + offset): the product
+    reveal on the first DROP, the reflective or "how it works" beat in the breakdown, the logo on
+    the last DROP. Set act `weight`s to the seconds you want; boundaries then fall where planned.
+    Print the timeline to check: `python -c "from adkit.film import Film; f = Film('<PROJECT>',
+    0.25, 30); [print(s.spec['scene'], round(s.a, 2), round(s.b, 2)) for s in f.scenes]"`
+    (run it from the engine folder).
+  - Duration is the hit + 2.4 s + `end_card.hold`. The track is thinned before the hit and fades
+    under the end card.
 - `music.transpose` (semitones), `music.gain_db`, `sfx_gain_db`.
 - Voice: `voice.engine` = `edge` (free Microsoft neural voices, needs internet), `elevenlabs`
   (needs `ELEVENLABS_API_KEY`; `voice.voice_id`, `voice.model` "eleven_v3"; audio tags like
